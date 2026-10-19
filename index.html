@@ -165,6 +165,9 @@
         .form-group label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
         .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 10px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; outline: none; }
 
+        .history-list { max-height: 220px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; margin-bottom: 16px; background: #f8fafc; }
+        .history-item { font-size: 12px; padding: 8px; border-bottom: 1px dashed #cbd5e1; display: flex; justify-content: space-between; align-items: center; }
+
         .editable-only { display: inline-flex; }
         body.readonly-mode .editable-only { display: none !important; }
 
@@ -173,7 +176,7 @@
 </head>
 <body>
 
-    <!-- 로그인 전체 화면 -->
+    <!-- 단색 전체화면 최초 로그인 화면 -->
     <div id="loginPageContainer">
         <form class="login-box-card" onsubmit="event.preventDefault(); processKCDLogin();">
             <div class="login-brand-head">CMS ERP System</div>
@@ -218,7 +221,26 @@
         </div>
     </div>
 
-    <!-- 신규 고객 수동 등록 모달 -->
+    <!-- 수금업로드 회차별 일괄 삭제 모달 -->
+    <div id="deleteUploadBatchModal" class="modal-overlay">
+        <div class="modal-card" style="width: 600px;">
+            <div class="modal-header">
+                <span>수금업로드 회차별 일괄 삭제</span>
+                <span style="cursor:pointer;" onclick="closeModal('deleteUploadBatchModal')">✕</span>
+            </div>
+            <div class="form-group">
+                <label>수금 엑셀 파일 업로드 이력 (회차별 전체 삭제)</label>
+                <div class="history-list" id="uploadBatchListContainer" style="max-height: 280px;">
+                    <div style="text-align:center; color:#94a3b8; padding:20px;">업로드된 수금 회차 이력이 없습니다.</div>
+                </div>
+            </div>
+            <div style="display:flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+                <button class="btn btn-outline" onclick="closeModal('deleteUploadBatchModal')">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 고객 수동 등록 모달 -->
     <div id="customerModal" class="modal-overlay">
         <div class="modal-card">
             <div class="modal-header">
@@ -328,11 +350,13 @@
                     <button class="btn btn-outline" style="font-size:12px; padding:6px 10px;" id="loginLogoutBtn" onclick="handleAuthBtnClick()">로그인</button>
                 </div>
                 <input type="file" id="fileInput" accept=".xlsx, .xls" />
+                <input type="file" id="paymentFileInput" accept=".xlsx, .xls" />
+                <input type="file" id="billingFileInput" accept=".xlsx, .xls" />
             </div>
         </header>
 
         <div class="container">
-            <!-- 1. 대시보드 -->
+            <!-- 1. 대시보드 뷰 -->
             <div id="view-dashboard" class="view-section active">
                 <div class="kpi-grid">
                     <div class="kpi-card"><div class="kpi-title">총 등록 고객 수</div><div class="kpi-value" id="kpi-stores">0 곳</div></div>
@@ -340,15 +364,26 @@
                     <div class="kpi-card"><div class="kpi-title">월 청구금액 합계</div><div class="kpi-value" style="color:#10b981;" id="kpi-billing">0 원</div></div>
                     <div class="kpi-card"><div class="kpi-title">미납 및 미정산 건수</div><div class="kpi-value" style="color:#ef4444;" id="kpi-agencies">0 건</div></div>
                 </div>
+                <div class="dashboard-grid-2col">
+                    <div class="content-card">
+                        <h3>가맹점 계약상태 분포</h3>
+                        <div style="height:220px;"><canvas id="chartStatusPie"></canvas></div>
+                    </div>
+                    <div class="content-card">
+                        <h3>월별 청구 / 수납 / 정산 추이</h3>
+                        <div style="height:220px;"><canvas id="chartMonthlyBar"></canvas></div>
+                    </div>
+                </div>
             </div>
 
-            <!-- 2. 고객관리 -->
+            <!-- 2. 고객관리 뷰 -->
             <div id="view-customer" class="view-section">
                 <div class="content-card">
                     <h3>
                         <span>가맹점 고객 세부정보 내역</span>
                         <div class="card-actions">
                             <button class="btn btn-primary editable-only" onclick="openModal('customerModal')">등록</button>
+                            <button class="btn btn-danger editable-only" onclick="deleteSelectedCustomers()">삭제</button>
                             <button class="btn btn-excel editable-only" onclick="triggerFileInput('fileInput')">대량업로드</button>
                         </div>
                     </h3>
@@ -373,55 +408,108 @@
                 </div>
             </div>
 
-            <!-- 3. 계약이력관리 -->
+            <!-- 3. 계약이력관리 뷰 -->
             <div id="view-historyManager" class="view-section">
                 <div class="content-card">
                     <h3><span>전체 계약 이력 통합 관리</span></h3>
-                    <p>등록된 계약 이력 관리 내역입니다.</p>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>NO.</th><th>회원번호</th><th>회원명</th><th>계약구분</th><th>계약 날짜</th><th>메모</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-manager-tbody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- 4. 수금관리 -->
+            <!-- 4. 수금관리 뷰 -->
             <div id="view-payment" class="view-section">
                 <div class="content-card">
-                    <h3><span>월별 수금 및 입금 관리 내역</span></h3>
-                    <p>월별 수금 내역 및 입금 관리 데이터입니다.</p>
+                    <h3>
+                        <span>월별 수금 및 입금 관리 내역</span>
+                        <div class="card-actions">
+                            <button class="btn btn-excel editable-only" onclick="triggerFileInput('paymentFileInput')">수금업로드</button>
+                            <button class="btn btn-danger editable-only" onclick="openDeleteBatchModal()">수금삭제</button>
+                        </div>
+                    </h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>NO.</th><th>회원번호</th><th>회원명</th><th>계약상태</th><th class="text-right">청구금액</th><th class="text-right">수납금액</th><th class="text-right">정산금액</th><th class="text-right">미납금액</th>
+                                </tr>
+                            </thead>
+                            <tbody id="payment-table-body"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- 5. 청구관리 -->
+            <!-- 5. 청구관리 뷰 -->
             <div id="view-billing" class="view-section">
                 <div class="content-card">
-                    <h3><span>월별 청구 내역 관리</span></h3>
-                    <p>월별 청구 데이터를 관리합니다.</p>
+                    <h3>
+                        <span>월별 청구 내역 관리</span>
+                        <div class="card-actions">
+                            <button class="btn btn-danger editable-only" onclick="deleteSelectedBillings()">삭제</button>
+                            <button class="btn btn-excel editable-only" onclick="triggerFileInput('billingFileInput')">대량업로드</button>
+                        </div>
+                    </h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="text-center"><input type="checkbox" id="selectAllBilling" onclick="toggleSelectAllBilling(this)" /></th>
+                                    <th>NO.</th><th>회원번호</th><th>회원명</th><th>청구월</th><th class="text-right">청구금액</th><th>수납상태</th>
+                                </tr>
+                            </thead>
+                            <tbody id="billing-table-body"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- 6. Viscovery 정산 -->
+            <!-- 6. Viscovery 정산 뷰 -->
             <div id="view-viscovery" class="view-section">
-                <div class="content-card">
-                    <h3><span>Viscovery AI스캐너 정산 현황</span></h3>
-                </div>
+                <div class="content-card"><h3><span>Viscovery AI스캐너 정산 현황</span></h3></div>
             </div>
 
-            <!-- 7. 영업수수료 정산 -->
+            <!-- 7. 영업수수료 정산 뷰 -->
             <div id="view-commission" class="view-section">
-                <div class="content-card">
-                    <h3><span>영업수수료 정산 요약</span></h3>
-                </div>
+                <div class="content-card"><h3><span>영업수수료 정산 요약</span></h3></div>
             </div>
 
-            <!-- 8. 페이백 정산 -->
+            <!-- 8. 페이백 정산 뷰 -->
             <div id="view-payback" class="view-section">
-                <div class="content-card">
-                    <h3><span>페이백 정산 내역 관리</span></h3>
-                </div>
+                <div class="content-card"><h3><span>페이백 정산 내역 관리</span></h3></div>
             </div>
 
-            <!-- 9. 관리자맵 -->
+            <!-- 9. 관리자맵 뷰 -->
             <div id="view-adminMap" class="view-section">
                 <div class="content-card">
                     <h3><span>아이디별 사용자 권한 및 계정 관리</span></h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr><th>NO.</th><th>아이디</th><th>권한</th><th>이름</th><th>핸드폰</th><th>이메일</th><th>관리</th></tr>
+                            </thead>
+                            <tbody id="admin-users-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="content-card">
+                    <h3>🗑️ 삭제된 데이터 휴지통 (원상 복구 관리)</h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr><th>NO.</th><th>회원번호</th><th>회원명</th><th>삭제시각</th><th>삭제자</th><th>복구</th></tr>
+                            </thead>
+                            <tbody id="trash-list-tbody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -440,6 +528,10 @@
         const db = firebase.database();
 
         let customerDataList = [];
+        let paymentDataMap = {};
+        let contractHistoryMap = {};
+        let billingDataList = [];
+        let deletedCustomerTrashList = [];
         let userAccountsList = [
             { id: "admin", pw: "1234", name: "최고관리자", role: "관리자", phone: "010-0000-0000", email: "admin@imupos.com" },
             { id: "psei", pw: "1111", name: "박세이", role: "관리자", phone: "010-9324-1452", email: "psei@imupos.com" }
@@ -479,6 +571,7 @@
 
             updateAuthUI();
             renderCustomerTable(customerDataList);
+            renderAdminUsersTable();
         });
 
         function updateAuthUI() {
@@ -584,6 +677,23 @@
                 </tr>`;
             });
             document.getElementById('customer-table-body').innerHTML = tbody;
+        }
+
+        function renderAdminUsersTable() {
+            let tbody = "";
+            userAccountsList.forEach((u, idx) => {
+                tbody += `<tr>
+                    <td>${idx + 1}</td>
+                    <td>${u.id}</td>
+                    <td>${u.role}</td>
+                    <td>${u.name}</td>
+                    <td>${u.phone}</td>
+                    <td>${u.email}</td>
+                    <td><button class="btn-action" onclick="alert('계정 관리 기능 준비중')">관리</button></td>
+                </tr>`;
+            });
+            let target = document.getElementById('admin-users-tbody');
+            if (target) target.innerHTML = tbody;
         }
 
         function openDetailModal(idx) {
