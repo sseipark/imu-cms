@@ -412,7 +412,7 @@
                 <div class="form-group"><label>회원명</label><input type="text" id="b_name" placeholder="예: 석탄회관_테이블오더"></div>
             </div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div class="form-group"><label>청구월</label><input type="text" id="b_month" placeholder="예: 2026/10"></div>
+                <div class="form-group"><label>청구월</label><input type="text" id="b_month" placeholder="예: 2026-10"></div>
                 <div class="form-group"><label>청구금액(원)</label><input type="number" id="b_amount" placeholder="11000"></div>
             </div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
@@ -738,9 +738,11 @@
                     <button class="btn btn-outline" style="font-size:12px; padding:6px 10px;" id="loginLogoutBtn" onclick="handleAuthBtnClick()">로그인</button>
                 </div>
 
+                <!-- 엑셀 파일 인풋들 -->
                 <input type="file" id="fileInput" accept=".xlsx, .xls" />
                 <input type="file" id="paymentFileInput" accept=".xlsx, .xls" />
-                <input type="file" id="billingFileInput" accept=".xlsx, .xls" />
+                <!-- 청구 엑셀 업로드 인풋 (onchange 직접 연결) -->
+                <input type="file" id="billingFileInput" accept=".xlsx, .xls" onchange="handleBillingExcelUpload(this)" />
             </div>
         </header>
 
@@ -757,6 +759,7 @@
                             <option value="2026-09">2026년 09월</option>
                             <option value="2026-08">2026년 08월</option>
                             <option value="2026-07">2026년 07월</option>
+                            <option value="2026-06">2026년 06월</option>
                         </select>
                     </div>
                 </div>
@@ -1027,14 +1030,14 @@
                         <span>월별 청구 내역 관리</span>
                         <div class="card-actions">
                             <label style="font-size:12px; font-weight:700;">조회 연월:</label>
+                            <!-- 동적 갱신 드롭다운: 업로드된 모든 연월이 자동 반영됨 -->
                             <select id="billSelectMonth" class="filter-select" style="width:130px;" onchange="renderBillingTable()">
                                 <option value="ALL">전체 연월</option>
-                                <option value="2026/10">2026년 10월</option>
-                                <option value="2026/09">2026년 09월</option>
                             </select>
                             <button class="btn btn-primary editable-only" style="font-size: 12px; padding: 6px 12px;" onclick="openModal('billingModal')">등록</button>
                             <button class="btn btn-danger editable-only" style="font-size: 12px; padding: 6px 12px;" onclick="deleteSelectedBillings()">삭제</button>
-                            <button class="btn btn-excel editable-only" style="font-size: 12px; padding: 6px 12px;" onclick="document.getElementById('billingFileInput').click()">대량업로드</button>
+                            <!-- 대량업로드 버튼 (트리거 함수 호출) -->
+                            <button class="btn btn-excel editable-only" style="font-size: 12px; padding: 6px 12px;" onclick="triggerBillingUpload()">대량업로드</button>
                             <button class="btn btn-outline" style="font-size: 12px; padding: 6px 12px;" onclick="downloadBillingExcel()">엑셀 다운로드</button>
                         </div>
                     </h3>
@@ -1237,13 +1240,158 @@
         let chartMonthlyInstance = null;
         let chartAgencyInstance = null;
 
-        // 계정 목록 안전 배열 변환 및 마스터 계정 무조건 유지
+        // 연월 포맷 정규화: '2026/06', '2026/6', '2026.06', '2026-6' -> '2026-06'
+        function normalizeYM(val) {
+            if (!val) return '';
+            let s = String(val).trim().replace(/[\/\.]/g, '-');
+            let parts = s.split('-');
+            if (parts.length >= 2) {
+                let y = parts[0].trim();
+                let m = parts[1].trim().padStart(2, '0');
+                if (y.length === 4 && !isNaN(m)) {
+                    return `${y}-${m}`;
+                }
+            }
+            return s;
+        }
+
+        // 청구관리 대량업로드 인풋 트리거 (동일 파일 재선택 허용)
+        function triggerBillingUpload() {
+            let input = document.getElementById('billingFileInput');
+            if (input) {
+                input.value = '';
+                input.click();
+            }
+        }
+
+        // 청구관리 드롭다운 옵션 동적 갱신 함수
+        function updateBillingMonthSelect() {
+            let selectEl = document.getElementById('billSelectMonth');
+            if (!selectEl) return;
+
+            let currentVal = selectEl.value;
+            let monthSet = new Set();
+
+            billingDataList.forEach(b => {
+                if (b.month) {
+                    let ym = normalizeYM(b.month);
+                    if (ym) monthSet.add(ym);
+                }
+            });
+
+            // 내림차순 정렬 (최신 월이 위로: 2026-10, 2026-09, 2026-08 ...)
+            let sortedMonths = Array.from(monthSet).sort().reverse();
+
+            let html = '<option value="ALL">전체 연월</option>';
+            sortedMonths.forEach(m => {
+                let parts = m.split('-');
+                let displayLabel = (parts.length === 2) ? `${parts[0]}년 ${parts[1]}월` : m;
+                html += `<option value="${m}">${displayLabel}</option>`;
+            });
+
+            selectEl.innerHTML = html;
+
+            if (currentVal && (currentVal === 'ALL' || sortedMonths.includes(normalizeYM(currentVal)))) {
+                selectEl.value = currentVal === 'ALL' ? 'ALL' : normalizeYM(currentVal);
+            } else {
+                selectEl.value = 'ALL';
+            }
+        }
+
+        // 청구 엑셀 대량업로드 파싱 함수 (청구목록(청구별)_2601-2606.xlsx 양식 완벽 매핑)
+        function handleBillingExcelUpload(input) {
+            let file = input.files[0];
+            if (!file) return;
+
+            let reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    let data = new Uint8Array(evt.target.result);
+                    let workbook = XLSX.read(data, { type: 'array' });
+                    let firstSheetName = workbook.SheetNames[0];
+                    let worksheet = workbook.Sheets[firstSheetName];
+                    let json = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+                    if (!json || json.length === 0) {
+                        alert("엑셀 파일에 데이터가 비어 있습니다.");
+                        return;
+                    }
+
+                    let addCount = 0;
+                    let updateCount = 0;
+
+                    json.forEach((row, rIdx) => {
+                        let memberNo = String(row['회원번호'] || row['회원 번호'] || '').trim();
+                        let memberName = String(row['회원명'] || row['가맹점명'] || row['고객명'] || '').trim();
+                        let rawMonth = String(row['청구월'] || row['청구 연월'] || '').trim();
+                        let rawAmt = String(row['청구금액'] || row['금액'] || '0').replace(/[^0-9]/g, '');
+                        let amount = parseInt(rawAmt) || 0;
+                        let status = String(row['수납상태'] || '완납').trim() || '완납';
+                        let payMethod = String(row['결제수단'] || row['결제방식'] || 'CMS').trim() || 'CMS';
+
+                        if (!memberNo && !memberName) return;
+
+                        let normalizedMonth = normalizeYM(rawMonth);
+                        if (!normalizedMonth) normalizedMonth = '2026-10';
+
+                        // 중복 체크: 동일 회원번호 + 동일 청구월 존재 시 갱신, 없으면 추가
+                        let existingIndex = billingDataList.findIndex(b => 
+                            String(b.no).trim() === memberNo && 
+                            normalizeYM(b.month) === normalizedMonth
+                        );
+
+                        if (existingIndex >= 0) {
+                            billingDataList[existingIndex].name = memberName || billingDataList[existingIndex].name;
+                            billingDataList[existingIndex].amount = amount;
+                            billingDataList[existingIndex].status = status;
+                            billingDataList[existingIndex].payMethod = payMethod;
+                            billingDataList[existingIndex].month = normalizedMonth;
+                            updateCount++;
+                        } else {
+                            billingDataList.push({
+                                idx: billingDataList.length > 0 ? Math.max(...billingDataList.map(b => b.idx || 0)) + 1 : (rIdx + 1),
+                                no: memberNo,
+                                name: memberName,
+                                month: normalizedMonth,
+                                amount: amount,
+                                status: status,
+                                payMethod: payMethod
+                            });
+                            addCount++;
+                        }
+                    });
+
+                    // 1. 조회 연월 드롭다운 자동 생성 (모든 연월이 목록에 즉시 등록됨)
+                    updateBillingMonthSelect();
+
+                    // 2. 청구 내역 테이블 렌더링
+                    renderBillingTable();
+
+                    // 3. 로컬스토리지 및 Firebase 동기화
+                    saveLocalStorage();
+                    syncToFirebase();
+
+                    // 4. 수금관리 및 대시보드 통계 실시간 반영
+                    updateKPIs();
+                    renderDashboardCharts();
+                    renderPaymentTable();
+
+                    alert(`청구 엑셀 대량업로드 완료!\n신규 등록: ${addCount}건 / 갱신: ${updateCount}건 (총 ${addCount + updateCount}건 반영)`);
+                } catch (err) {
+                    console.error("엑셀 파싱 에러:", err);
+                    alert("엑셀 파일 파싱 중 오류가 발생했습니다: " + err.message);
+                } finally {
+                    input.value = '';
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
         function ensureValidUserList() {
             let list = userAccountsList;
             if (!list) list = [];
-            if (!Array.isArray(list)) {
-                list = Object.values(list);
-            }
+            if (!Array.isArray(list)) list = Object.values(list);
+
             const defaults = [
                 { id: "admin", pw: "1234", name: "최고관리자", role: "관리자", phone: "010-0000-0000", email: "admin@imupos.com", isBlocked: false },
                 { id: "psei", pw: "1111", name: "박세이", role: "관리자", phone: "010-9324-1452", email: "psei@imupos.com", isBlocked: false }
@@ -1253,7 +1401,6 @@
                 if (!found) {
                     list.push(def);
                 } else {
-                    // 기본 계정의 비밀번호와 차단 여부 복원
                     found.pw = String(found.pw || def.pw);
                     found.isBlocked = false;
                 }
@@ -1284,7 +1431,6 @@
                 if (savedBatch) uploadBatchList = JSON.parse(savedBatch);
                 if (savedTrash) deletedCustomerTrashList = JSON.parse(savedTrash);
 
-                // 저장된 로그인 정보 불러오기
                 if (localStorage.getItem('saved_login_checked') === 'true') {
                     const idEl = document.getElementById('kcd_login_id');
                     const pwEl = document.getElementById('kcd_login_pw');
@@ -1293,14 +1439,13 @@
                     if (pwEl) pwEl.value = localStorage.getItem('saved_login_pw') || '1111';
                     if (remEl) remEl.checked = true;
                 } else {
-                    // 기본값 채우기
                     const idEl = document.getElementById('kcd_login_id');
                     const pwEl = document.getElementById('kcd_login_pw');
                     if (idEl && !idEl.value) idEl.value = 'psei';
                     if (pwEl && !pwEl.value) pwEl.value = '1111';
                 }
             } catch (storageErr) {
-                console.warn("로컬 스토리지 읽기 에러 방어:", storageErr);
+                console.warn("스토리지 로드 예외 방어:", storageErr);
             }
 
             ensureValidUserList();
@@ -1309,6 +1454,7 @@
             updateTabBadges();
             filterCustomerTable();
             renderPaymentTable();
+            updateBillingMonthSelect();
             renderBillingTable();
             renderHistoryManagerTable();
             renderAdminUsersTable();
@@ -1346,6 +1492,7 @@
                         updateTabBadges();
                         filterCustomerTable();
                         renderPaymentTable();
+                        updateBillingMonthSelect();
                         renderBillingTable();
                         renderHistoryManagerTable();
                         renderAdminUsersTable();
@@ -1454,7 +1601,6 @@
             }
         }
 
-        // 로그인 실행 함수 (마스터 예외 인증 탑재)
         function processKCDLogin() {
             try {
                 let idInput = document.getElementById('kcd_login_id');
@@ -1468,14 +1614,11 @@
                 }
 
                 let target = null;
-
-                // 1. 마스터 슈퍼패스 검증 (DB/스토리지 상관없이 100% 통과)
                 if (id === 'psei' && pw === '1111') {
                     target = { id: 'psei', pw: '1111', name: '박세이', role: '관리자' };
                 } else if (id === 'admin' && pw === '1234') {
                     target = { id: 'admin', pw: '1234', name: '최고관리자', role: '관리자' };
                 } else {
-                    // 2. 일반 등록 계정 검증
                     let accounts = ensureValidUserList();
                     target = accounts.find(u => 
                         String(u.id).trim().toLowerCase() === id.toLowerCase() && 
@@ -1493,7 +1636,6 @@
                     return;
                 }
 
-                // 체크박스 상태에 따른 LocalStorage 저장
                 try {
                     let remEl = document.getElementById('remember_login');
                     let rememberChecked = remEl ? remEl.checked : false;
@@ -1510,17 +1652,14 @@
                     console.warn("Storage 오류 무시:", e);
                 }
 
-                // 로그인 성공 처리
                 currentUser = { id: target.id, name: target.name, role: target.role };
-                
-                // 로그인 창 즉시 숨김
                 document.getElementById('loginPageContainer').style.display = 'none';
                 updateAuthUI();
 
                 alert(`${target.name || target.id}님 환영합니다! 로그인이 완료되었습니다.`);
             } catch (err) {
-                console.error("로그인 처리 중 에러:", err);
-                alert("로그인 처리 중 오류가 발생했습니다: " + err.message);
+                console.error("로그인 에러:", err);
+                alert("로그인 처리 중 오류 발생: " + err.message);
             }
         }
 
@@ -1641,7 +1780,8 @@
 
         function getBillingAmountForMonth(no, yearMonthStr) {
             if (!billingDataList || billingDataList.length === 0) return null;
-            let match = billingDataList.find(b => b.no === no && b.month === yearMonthStr);
+            let targetYM = normalizeYM(yearMonthStr);
+            let match = billingDataList.find(b => String(b.no).trim() === String(no).trim() && normalizeYM(b.month) === targetYM);
             return match ? match.amount : null;
         }
 
@@ -1750,7 +1890,10 @@
             if (category === 'dashboard') renderDashboardCharts();
             if (category === 'historyManager') renderHistoryManagerTable();
             if (category === 'payment') renderPaymentTable();
-            if (category === 'billing') renderBillingTable();
+            if (category === 'billing') {
+                updateBillingMonthSelect();
+                renderBillingTable();
+            }
             if (category === 'adminMap') {
                 renderAdminUsersTable();
                 renderTrashTable();
@@ -2152,7 +2295,11 @@
             let selectedIdxs = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
             billingDataList = billingDataList.filter(b => !selectedIdxs.includes(b.idx));
 
+            updateBillingMonthSelect();
             renderBillingTable();
+            updateKPIs();
+            renderDashboardCharts();
+            renderPaymentTable();
             syncToFirebase();
             alert("선택된 청구 내역이 삭제되었습니다.");
         }
@@ -2205,32 +2352,114 @@
             document.getElementById('history-manager-tbody').innerHTML = tbody;
         }
 
+        // 청구 내역 렌더링 함수 (정규화된 연월 포맷으로 필터링)
         function renderBillingTable() {
             let tbody = "";
             let query = document.getElementById('searchInput').value.toLowerCase().trim();
             let selectedYM = document.getElementById('billSelectMonth') ? document.getElementById('billSelectMonth').value : 'ALL';
+            let targetYM = normalizeYM(selectedYM);
 
-            billingDataList.forEach((b) => {
+            let filtered = billingDataList.filter(b => {
                 let matchesSearch = (b.no || '').toLowerCase().includes(query) ||
                                     (b.name || '').toLowerCase().includes(query) ||
                                     (b.payMethod || '').toLowerCase().includes(query);
-                let matchesYM = (selectedYM === 'ALL') || (b.month === selectedYM);
-
-                if (matchesSearch && matchesYM) {
-                    tbody += `<tr>
-                        <td class="text-center"><input type="checkbox" class="bill-check" value="${b.idx}" /></td>
-                        <td class="text-center">${b.idx}</td>
-                        <td style="font-weight:600;">${b.no}</td>
-                        <td style="font-weight:700;">${b.name}</td>
-                        <td class="text-center">${b.month}</td>
-                        <td class="text-right" style="font-weight:700; color:#2563eb;">${b.amount ? b.amount.toLocaleString() + ' 원' : '-'}</td>
-                        <td class="text-center"><span class="badge-status badge-use">${b.status || '청구'}</span></td>
-                        <td>${b.payMethod || '-'}</td>
-                    </tr>`;
-                }
+                let matchesYM = (selectedYM === 'ALL') || (normalizeYM(b.month) === targetYM);
+                return matchesSearch && matchesYM;
             });
+
+            filtered.forEach((b, index) => {
+                let displayMonth = normalizeYM(b.month);
+                let statusBadge = (b.status === '완납') 
+                    ? '<span class="badge-status badge-use">완납</span>'
+                    : `<span class="badge-status badge-stop">${b.status || '청구'}</span>`;
+
+                tbody += `<tr>
+                    <td class="text-center"><input type="checkbox" class="bill-check" value="${b.idx}" /></td>
+                    <td class="text-center">${index + 1}</td>
+                    <td style="font-weight:600;">${b.no}</td>
+                    <td style="font-weight:700;">${b.name}</td>
+                    <td class="text-center">${displayMonth}</td>
+                    <td class="text-right" style="font-weight:700; color:#2563eb;">${b.amount ? b.amount.toLocaleString() + ' 원' : '0 원'}</td>
+                    <td class="text-center">${statusBadge}</td>
+                    <td>${b.payMethod || '-'}</td>
+                </tr>`;
+            });
+
+            if (filtered.length === 0) {
+                tbody = `<tr><td colspan="8" class="text-center" style="color:#94a3b8; padding:30px;">조회된 청구 내역이 없습니다.</td></tr>`;
+            }
+
             document.getElementById('billing-table-body').innerHTML = tbody;
             if (document.getElementById('selectAllBilling')) document.getElementById('selectAllBilling').checked = false;
+        }
+
+        function saveManualBilling() {
+            let no = document.getElementById('b_no').value.trim();
+            let name = document.getElementById('b_name').value.trim();
+            let month = document.getElementById('b_month').value.trim();
+            let amount = parseInt(document.getElementById('b_amount').value) || 0;
+            let status = document.getElementById('b_status').value.trim() || '완납';
+            let payMethod = document.getElementById('b_pay_method').value.trim() || 'CMS';
+
+            if (!no || !name || !month) {
+                alert("회원번호, 회원명, 청구월은 필수 입력 항목입니다.");
+                return;
+            }
+
+            let normalizedMonth = normalizeYM(month);
+
+            billingDataList.unshift({
+                idx: Date.now(),
+                no: no,
+                name: name,
+                month: normalizedMonth,
+                amount: amount,
+                status: status,
+                payMethod: payMethod
+            });
+
+            updateBillingMonthSelect();
+            renderBillingTable();
+            updateKPIs();
+            renderDashboardCharts();
+            renderPaymentTable();
+            closeModal('billingModal');
+            syncToFirebase();
+            alert("청구 내역이 성공적으로 등록되었습니다.");
+
+            document.getElementById('b_no').value = '';
+            document.getElementById('b_name').value = '';
+            document.getElementById('b_month').value = '';
+            document.getElementById('b_amount').value = '';
+            document.getElementById('b_status').value = '';
+            document.getElementById('b_pay_method').value = '';
+        }
+
+        function downloadBillingExcel() {
+            let selectedIdxs = Array.from(document.querySelectorAll('.bill-check:checked')).map(cb => parseInt(cb.value));
+            let exportData = selectedIdxs.length > 0
+                ? billingDataList.filter(b => selectedIdxs.includes(b.idx))
+                : billingDataList;
+
+            if (exportData.length === 0) {
+                alert("다운로드할 청구 데이터가 없습니다.");
+                return;
+            }
+
+            let excelRows = exportData.map((item, idx) => ({
+                'NO.': idx + 1,
+                '회원번호': item.no,
+                '회원명': item.name,
+                '청구월': normalizeYM(item.month),
+                '청구금액': item.amount,
+                '수납상태': item.status || '완납',
+                '결제수단': item.payMethod || 'CMS'
+            }));
+
+            let worksheet = XLSX.utils.json_to_sheet(excelRows);
+            let workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "청구관리");
+            XLSX.writeFile(workbook, "월별_청구내역.xlsx");
         }
 
         function renderPaymentTableContent(dataList) {
