@@ -190,6 +190,7 @@
         .content-card h3 { margin-top: 0; font-size: 15px; color: var(--text-main); margin-bottom: 14px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
         .card-actions { display: flex; gap: 8px; align-items: center; }
 
+        /* 상단 실시간 요약 배너 */
         .summary-total-strip {
             display: flex;
             align-items: center;
@@ -272,23 +273,21 @@
             <div class="login-brand-head">CMS ERP System</div>
             <div class="login-sub-head">전사적 자원관리를 위한 통합 로그인 페이지</div>
             
-            <form onsubmit="event.preventDefault(); processKCDLogin();">
-                <div class="login-input-group">
-                    <label for="kcd_login_id">아이디</label>
-                    <input type="text" id="kcd_login_id" placeholder="아이디 입력" onkeydown="if(event.key==='Enter') processKCDLogin();">
-                </div>
-                <div class="login-input-group">
-                    <label for="kcd_login_pw">비밀번호</label>
-                    <input type="password" id="kcd_login_pw" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter') processKCDLogin();">
-                </div>
-                
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
-                    <input type="checkbox" id="remember_login" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
-                    <label for="remember_login" style="font-size: 12px; color: #cbd5e1; cursor: pointer; margin: 0; font-weight: 500;">아이디 / 비밀번호 저장</label>
-                </div>
+            <div class="login-input-group">
+                <label for="kcd_login_id">아이디</label>
+                <input type="text" id="kcd_login_id" placeholder="아이디 입력" onkeydown="if(event.key==='Enter') processKCDLogin();">
+            </div>
+            <div class="login-input-group">
+                <label for="kcd_login_pw">비밀번호</label>
+                <input type="password" id="kcd_login_pw" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter') processKCDLogin();">
+            </div>
+            
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+                <input type="checkbox" id="remember_login" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+                <label for="remember_login" style="font-size: 12px; color: #cbd5e1; cursor: pointer; margin: 0; font-weight: 500;">아이디 / 비밀번호 저장</label>
+            </div>
 
-                <button type="button" class="btn-main-login" id="mainLoginSubmitBtn" onclick="processKCDLogin()">시스템 로그인</button>
-            </form>
+            <button type="button" class="btn-main-login" id="mainLoginSubmitBtn" onclick="processKCDLogin()">시스템 로그인</button>
 
             <div style="text-align: center; margin-top: 16px;">
                 <a href="javascript:void(0)" style="font-size: 12px; color: #38bdf8; text-decoration: none;" onclick="openModal('findPwModal')">비밀번호 변경/찾기</a>
@@ -444,7 +443,7 @@
         </div>
     </div>
 
-    <!-- 4. 계약이력 팝업 모달 (완전 복구됨) -->
+    <!-- 4. 계약이력 팝업 모달 -->
     <div id="contractHistoryModal" class="modal-overlay">
         <div class="modal-card">
             <div class="modal-header">
@@ -456,7 +455,6 @@
 
             <div class="form-group">
                 <label>등록된 계약 이력 목록</label>
-                <!-- 자바스크립트로 고객별 등록된 이력 목록이 실시간 렌더링됨 -->
                 <div class="history-list" id="historyListContainer">
                     <div style="text-align:center; color:#94a3b8; padding:20px;">등록된 계약이력이 없습니다.</div>
                 </div>
@@ -494,7 +492,7 @@
         </div>
     </div>
 
-    <!-- 5. 서류 모달 (완전 복구됨) -->
+    <!-- 5. 서류 모달 -->
     <div id="docModal" class="modal-overlay">
         <div class="modal-card">
             <div class="modal-header">
@@ -530,7 +528,7 @@
         </div>
     </div>
 
-    <!-- 6. 상담 모달 (완전 복구됨) -->
+    <!-- 6. 상담 모달 -->
     <div id="counselModal" class="modal-overlay">
         <div class="modal-card">
             <div class="modal-header">
@@ -1016,7 +1014,6 @@
                         </div>
                     </h3>
 
-                    <!-- 수금관리 상단 실시간 총합계 배너 -->
                     <div class="summary-total-strip" id="paymentSummaryStrip">
                         <div class="summary-total-item">
                             <span class="summary-total-label">조회 가맹점</span>
@@ -1092,7 +1089,6 @@
                         </div>
                     </h3>
 
-                    <!-- 청구관리 상단 실시간 총합계 배너 -->
                     <div class="summary-total-strip" id="billingSummaryStrip">
                         <div class="summary-total-item">
                             <span class="summary-total-label">조회 청구건수</span>
@@ -2261,12 +2257,13 @@
             managerSelect.value = managers.includes(currentManager) ? currentManager : 'ALL';
         }
 
+        // 고객관리 테이블 렌더링 (계약이력을 시간순(과거->최신) 오름차순으로 정렬하여 표시)
         function renderCustomerTable(dataList) {
             let tbody = "";
             dataList.forEach((item) => {
                 let statusBadge = item.status === '사용' ? '<span class="badge-status badge-use">사용</span>' : '<span class="badge-status badge-stop">'+item.status+'</span>';
                 
-                // 고객의 계약이력 배열 초기화 보장 (최초 청구시작일 연동)
+                // 최초 청구시작일 이력 초기화 보장
                 if ((!contractHistoryMap[item.no] || contractHistoryMap[item.no].length === 0) && item.startDate) {
                     contractHistoryMap[item.no] = [{
                         type: item.status || '사용',
@@ -2276,7 +2273,13 @@
                     }];
                 }
 
-                let hList = contractHistoryMap[item.no] || [];
+                // 날짜 오름차순 정렬 (2017년 먼저, 2024년이 그 밑에 표시됨)
+                let hList = (contractHistoryMap[item.no] || []).slice().sort((a, b) => {
+                    let dA = a.date || a.startDate || '';
+                    let dB = b.date || b.startDate || '';
+                    return dA.localeCompare(dB);
+                });
+
                 let historySummary = "";
                 if (hList.length > 0) {
                     hList.forEach(h => {
@@ -2317,7 +2320,7 @@
             document.getElementById('selectAllCustomer').checked = false;
         }
 
-        // 계약이력 모달 팝업 열기
+        // 계약이력 모달 팝업 열기 (시간순 정렬 적용)
         function openContractHistoryModal(no) {
             let item = customerDataList.find(x => x.no === no);
             if (!item) return;
@@ -2325,7 +2328,6 @@
             document.getElementById('h_cust_no').value = item.no;
             document.getElementById('h_cust_info').innerText = `[${item.no}] ${item.name} - 계약이력 관리`;
 
-            // 최초 청구시작일이 누락되지 않도록 contractHistoryMap에 보장
             if ((!contractHistoryMap[no] || contractHistoryMap[no].length === 0) && item.startDate) {
                 contractHistoryMap[no] = [{
                     type: item.status || '사용',
@@ -2337,7 +2339,6 @@
 
             renderContractHistoryModalList(no);
 
-            // 입력 폼 초기화
             document.getElementById('h_type').value = '사용';
             document.getElementById('h_date').value = '';
             document.getElementById('h_memo').value = '';
@@ -2347,9 +2348,16 @@
             openModal('contractHistoryModal');
         }
 
+        // 계약이력 모달 목록 렌더링 (과거 -> 최신 순으로 정렬)
         function renderContractHistoryModalList(no) {
             let container = document.getElementById('historyListContainer');
-            let list = contractHistoryMap[no] || [];
+            
+            // 날짜 오름차순으로 정렬
+            let list = (contractHistoryMap[no] || []).slice().sort((a, b) => {
+                let dA = a.date || a.startDate || '';
+                let dB = b.date || b.startDate || '';
+                return dA.localeCompare(dB);
+            });
 
             if (list.length === 0) {
                 container.innerHTML = `<div style="text-align:center; color:#94a3b8; padding:20px;">등록된 계약이력이 없습니다.</div>`;
@@ -2378,6 +2386,7 @@
             container.innerHTML = html;
         }
 
+        // 계약이력 추가 저장 함수 (시간순 정렬 및 최신 상태 반영)
         function saveContractHistory() {
             let no = document.getElementById('h_cust_no').value;
             if (!no) { alert("고객 정보가 올바르지 않습니다."); return; }
@@ -2397,20 +2406,33 @@
                 contractHistoryMap[no] = [];
             }
 
-            contractHistoryMap[no].unshift({
+            // 신규 이력 추가
+            contractHistoryMap[no].push({
                 type: type,
                 date: date,
                 memo: memo,
                 fileName: fileName
             });
 
+            // 추가 후 전체 계약이력을 날짜 오름차순(과거->최신)으로 정렬
+            contractHistoryMap[no].sort((a, b) => {
+                let dA = a.date || a.startDate || '';
+                let dB = b.date || b.startDate || '';
+                return dA.localeCompare(dB);
+            });
+
+            // 가장 마지막(최신 날짜) 이력의 상태를 고객 계약상태로 갱신
             let cust = customerDataList.find(c => c.no === no);
-            if (cust && (type === '사용' || type === '중지')) {
-                cust.status = type;
+            if (cust && contractHistoryMap[no].length > 0) {
+                let latestItem = contractHistoryMap[no][contractHistoryMap[no].length - 1];
+                if (latestItem.type === '사용' || latestItem.type === '중지') {
+                    cust.status = latestItem.type;
+                }
             }
 
             logEditRecord('CUST', no, `계약이력 추가 (${type}, ${date}${memo ? ', ' + memo : ''})`);
 
+            // 모달 및 화면 즉시 갱신
             renderContractHistoryModalList(no);
             
             document.getElementById('h_date').value = '';
@@ -2433,6 +2455,16 @@
             if (!confirm("해당 계약 이력을 삭제하시겠습니까?")) return;
 
             contractHistoryMap[no].splice(idx, 1);
+            
+            // 삭제 후 최신 상태 동기화
+            let cust = customerDataList.find(c => c.no === no);
+            if (cust && contractHistoryMap[no].length > 0) {
+                let latestItem = contractHistoryMap[no][contractHistoryMap[no].length - 1];
+                if (latestItem.type === '사용' || latestItem.type === '중지') {
+                    cust.status = latestItem.type;
+                }
+            }
+
             logEditRecord('CUST', no, `계약이력 항목 삭제`);
 
             renderContractHistoryModalList(no);
@@ -2457,9 +2489,18 @@
             contractHistoryMap[custNo][hIdx].date = dateEl.value;
             contractHistoryMap[custNo][hIdx].memo = memoEl.value.trim();
 
+            contractHistoryMap[custNo].sort((a, b) => {
+                let dA = a.date || a.startDate || '';
+                let dB = b.date || b.startDate || '';
+                return dA.localeCompare(dB);
+            });
+
             let cust = customerDataList.find(c => c.no === custNo);
-            if (cust && hIdx === 0 && (typeEl.value === '사용' || typeEl.value === '중지')) {
-                cust.status = typeEl.value;
+            if (cust && contractHistoryMap[custNo].length > 0) {
+                let latestItem = contractHistoryMap[custNo][contractHistoryMap[custNo].length - 1];
+                if (latestItem.type === '사용' || latestItem.type === '중지') {
+                    cust.status = latestItem.type;
+                }
             }
 
             logEditRecord('CUST', custNo, `계약이력 수정 ([${typeEl.value}] ${dateEl.value})`);
@@ -2492,7 +2533,7 @@
             alert("계약 이력이 삭제되었습니다.");
         }
 
-        // 관련 서류 모달 팝업
+        // 관련 서류 모달
         function openDocModal(no) {
             let item = customerDataList.find(x => x.no === no);
             if (!item) return;
@@ -2572,7 +2613,7 @@
             syncToFirebase();
         }
 
-        // 상담 내역 모달 팝업
+        // 상담 내역 모달
         function openCounselModal(no) {
             let item = customerDataList.find(x => x.no === no);
             if (!item) return;
@@ -2690,23 +2731,25 @@
 
             if (oldAmt !== newAmt) {
                 if (!contractHistoryMap[item.no]) contractHistoryMap[item.no] = [];
-                contractHistoryMap[item.no].unshift({
+                contractHistoryMap[item.no].push({
                     type: '상품금액변경',
                     date: todayStr,
                     memo: `상품금액 변경: ${oldAmt.toLocaleString()}원 -> ${newAmt.toLocaleString()}원`,
                     fileName: ''
                 });
+                contractHistoryMap[item.no].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 logEditRecord('CUST', item.no, `상품금액 변경 (${oldAmt.toLocaleString()}원 -> ${newAmt.toLocaleString()}원)`);
             }
 
             if (oldComm !== newComm) {
                 if (!contractHistoryMap[item.no]) contractHistoryMap[item.no] = [];
-                contractHistoryMap[item.no].unshift({
+                contractHistoryMap[item.no].push({
                     type: '영업수수료변경',
                     date: todayStr,
                     memo: `영업수수료 변경: ${oldComm.toLocaleString()}원 -> ${newComm.toLocaleString()}원`,
                     fileName: ''
                 });
+                contractHistoryMap[item.no].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 logEditRecord('CUST', item.no, `영업수수료 변경 (${oldComm.toLocaleString()}원 -> ${newComm.toLocaleString()}원)`);
             }
 
@@ -2855,8 +2898,8 @@
             }
 
             let excelRows = exportData.map(item => {
-                let hList = contractHistoryMap[item.no] || [];
-                let lastHistory = hList.length > 0 ? `${hList[0].type} (${hList[0].date || hList[0].startDate || '-'})` : '-';
+                let hList = (contractHistoryMap[item.no] || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                let lastHistory = hList.length > 0 ? `${hList[hList.length - 1].type} (${hList[hList.length - 1].date || hList[hList.length - 1].startDate || '-'})` : '-';
                 return {
                     'NO.': item.idx,
                     '회원번호': item.no,
@@ -2924,7 +2967,7 @@
 
             if (no && startD) {
                 if (!contractHistoryMap[no]) contractHistoryMap[no] = [];
-                contractHistoryMap[no].unshift({
+                contractHistoryMap[no].push({
                     type: statusVal || '사용',
                     date: startD,
                     memo: '신규등록 시 청구시작일 자동연동',
