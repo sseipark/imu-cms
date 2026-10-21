@@ -190,7 +190,6 @@
         .content-card h3 { margin-top: 0; font-size: 15px; color: var(--text-main); margin-bottom: 14px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
         .card-actions { display: flex; gap: 8px; align-items: center; }
 
-        /* 상단 실시간 요약 배너 */
         .summary-total-strip {
             display: flex;
             align-items: center;
@@ -1530,20 +1529,37 @@
                     clearTimeout(syncTimeout);
                     const data = snapshot.val();
                     if (data) {
-                        customerDataList = data.customers || [];
-                        paymentDataMap = data.payments || {};
-                        contractHistoryMap = data.histories || {};
-                        billingDataList = data.billings || [];
-                        docDataMap = data.docs || {};
-                        counselDataMap = data.counsels || {};
+                        customerDataList = data.customers || customerDataList;
+                        paymentDataMap = data.payments || paymentDataMap;
+                        
+                        // [핵심 해결] Firebase의 빈 histories로 로컬스토리지 데이터를 덮어써서 날리지 않도록 지능형 병합(Smart Merge) 적용
+                        let serverHist = data.histories || {};
+                        for (let k in contractHistoryMap) {
+                            if (!serverHist[k] || serverHist[k].length === 0) {
+                                serverHist[k] = contractHistoryMap[k];
+                            } else {
+                                let merged = [...serverHist[k]];
+                                (contractHistoryMap[k] || []).forEach(localItem => {
+                                    let exists = merged.some(m => m.type === localItem.type && m.date === localItem.date);
+                                    if (!exists) merged.push(localItem);
+                                });
+                                merged.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                                serverHist[k] = merged;
+                            }
+                        }
+                        contractHistoryMap = serverHist;
+
+                        billingDataList = data.billings || billingDataList;
+                        docDataMap = data.docs || docDataMap;
+                        counselDataMap = data.counsels || counselDataMap;
                         if (data.users) {
                             userAccountsList = Array.isArray(data.users) ? data.users : Object.values(data.users);
                         }
                         ensureValidUserList();
-                        custEditLogMap = data.custLogs || {};
-                        payEditLogMap = data.payLogs || {};
+                        custEditLogMap = data.custLogs || custEditLogMap;
+                        payEditLogMap = data.payLogs || payEditLogMap;
                         uploadBatchList = data.batches || uploadBatchList;
-                        deletedCustomerTrashList = data.trash || [];
+                        deletedCustomerTrashList = data.trash || deletedCustomerTrashList;
 
                         saveLocalStorage();
                         updateAuthUI();
@@ -1582,19 +1598,25 @@
 
         function syncToFirebase() {
             saveLocalStorage();
-            db.ref('cms_erp_data').set({
-                customers: customerDataList,
-                payments: paymentDataMap,
-                histories: contractHistoryMap,
-                billings: billingDataList,
-                docs: docDataMap,
-                counsels: counselDataMap,
-                users: userAccountsList,
-                custLogs: custEditLogMap,
-                payLogs: payEditLogMap,
-                batches: uploadBatchList,
-                trash: deletedCustomerTrashList
-            });
+            try {
+                db.ref('cms_erp_data').set({
+                    customers: customerDataList,
+                    payments: paymentDataMap,
+                    histories: contractHistoryMap,
+                    billings: billingDataList,
+                    docs: docDataMap,
+                    counsels: counselDataMap,
+                    users: userAccountsList,
+                    custLogs: custEditLogMap,
+                    payLogs: payEditLogMap,
+                    batches: uploadBatchList,
+                    trash: deletedCustomerTrashList
+                }).catch(err => {
+                    console.warn("Firebase set write error:", err);
+                });
+            } catch (err) {
+                console.warn("Firebase sync error:", err);
+            }
         }
 
         function saveLocalStorage() {
@@ -2257,7 +2279,7 @@
             managerSelect.value = managers.includes(currentManager) ? currentManager : 'ALL';
         }
 
-        // 고객관리 테이블 렌더링 (계약이력을 시간순(과거->최신) 오름차순으로 정렬하여 표시)
+        // 고객관리 테이블 렌더링 (과거 날짜가 위, 최신 날짜가 아래로 정렬)
         function renderCustomerTable(dataList) {
             let tbody = "";
             dataList.forEach((item) => {
@@ -2273,7 +2295,7 @@
                     }];
                 }
 
-                // 날짜 오름차순 정렬 (2017년 먼저, 2024년이 그 밑에 표시됨)
+                // 날짜 오름차순 정렬 (과거 날짜 -> 최신 날짜 순)
                 let hList = (contractHistoryMap[item.no] || []).slice().sort((a, b) => {
                     let dA = a.date || a.startDate || '';
                     let dB = b.date || b.startDate || '';
@@ -2320,7 +2342,7 @@
             document.getElementById('selectAllCustomer').checked = false;
         }
 
-        // 계약이력 모달 팝업 열기 (시간순 정렬 적용)
+        // 계약이력 모달 팝업 열기
         function openContractHistoryModal(no) {
             let item = customerDataList.find(x => x.no === no);
             if (!item) return;
@@ -2348,11 +2370,10 @@
             openModal('contractHistoryModal');
         }
 
-        // 계약이력 모달 목록 렌더링 (과거 -> 최신 순으로 정렬)
+        // 계약이력 모달 목록 렌더링 (과거 -> 최신 날짜 순 정렬)
         function renderContractHistoryModalList(no) {
             let container = document.getElementById('historyListContainer');
             
-            // 날짜 오름차순으로 정렬
             let list = (contractHistoryMap[no] || []).slice().sort((a, b) => {
                 let dA = a.date || a.startDate || '';
                 let dB = b.date || b.startDate || '';
@@ -2386,7 +2407,7 @@
             container.innerHTML = html;
         }
 
-        // 계약이력 추가 저장 함수 (시간순 정렬 및 최신 상태 반영)
+        // 계약이력 추가 저장 함수 (로컬스토리지 즉시 저장 및 지능형 병합)
         function saveContractHistory() {
             let no = document.getElementById('h_cust_no').value;
             if (!no) { alert("고객 정보가 올바르지 않습니다."); return; }
@@ -2406,7 +2427,6 @@
                 contractHistoryMap[no] = [];
             }
 
-            // 신규 이력 추가
             contractHistoryMap[no].push({
                 type: type,
                 date: date,
@@ -2414,7 +2434,7 @@
                 fileName: fileName
             });
 
-            // 추가 후 전체 계약이력을 날짜 오름차순(과거->최신)으로 정렬
+            // 날짜 오름차순(과거->최신)으로 정렬
             contractHistoryMap[no].sort((a, b) => {
                 let dA = a.date || a.startDate || '';
                 let dB = b.date || b.startDate || '';
@@ -2432,7 +2452,7 @@
 
             logEditRecord('CUST', no, `계약이력 추가 (${type}, ${date}${memo ? ', ' + memo : ''})`);
 
-            // 모달 및 화면 즉시 갱신
+            // 모달 및 메인 테이블 갱신
             renderContractHistoryModalList(no);
             
             document.getElementById('h_date').value = '';
@@ -2445,6 +2465,7 @@
             updateKPIs();
             renderDashboardCharts();
 
+            // 로컬스토리지 및 Firebase 영구 보존
             saveLocalStorage();
             syncToFirebase();
 
@@ -2456,7 +2477,6 @@
 
             contractHistoryMap[no].splice(idx, 1);
             
-            // 삭제 후 최신 상태 동기화
             let cust = customerDataList.find(c => c.no === no);
             if (cust && contractHistoryMap[no].length > 0) {
                 let latestItem = contractHistoryMap[no][contractHistoryMap[no].length - 1];
