@@ -272,21 +272,23 @@
             <div class="login-brand-head">CMS ERP System</div>
             <div class="login-sub-head">전사적 자원관리를 위한 통합 로그인 페이지</div>
             
-            <div class="login-input-group">
-                <label for="kcd_login_id">아이디</label>
-                <input type="text" id="kcd_login_id" placeholder="아이디 입력" onkeydown="if(event.key==='Enter') processKCDLogin();">
-            </div>
-            <div class="login-input-group">
-                <label for="kcd_login_pw">비밀번호</label>
-                <input type="password" id="kcd_login_pw" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter') processKCDLogin();">
-            </div>
-            
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
-                <input type="checkbox" id="remember_login" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
-                <label for="remember_login" style="font-size: 12px; color: #cbd5e1; cursor: pointer; margin: 0; font-weight: 500;">아이디 / 비밀번호 저장</label>
-            </div>
+            <form onsubmit="event.preventDefault(); processKCDLogin();">
+                <div class="login-input-group">
+                    <label for="kcd_login_id">아이디</label>
+                    <input type="text" id="kcd_login_id" placeholder="아이디 입력" onkeydown="if(event.key==='Enter') processKCDLogin();">
+                </div>
+                <div class="login-input-group">
+                    <label for="kcd_login_pw">비밀번호</label>
+                    <input type="password" id="kcd_login_pw" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter') processKCDLogin();">
+                </div>
+                
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+                    <input type="checkbox" id="remember_login" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+                    <label for="remember_login" style="font-size: 12px; color: #cbd5e1; cursor: pointer; margin: 0; font-weight: 500;">아이디 / 비밀번호 저장</label>
+                </div>
 
-            <button type="button" class="btn-main-login" id="mainLoginSubmitBtn" onclick="processKCDLogin()">시스템 로그인</button>
+                <button type="button" class="btn-main-login" id="mainLoginSubmitBtn" onclick="processKCDLogin()">시스템 로그인</button>
+            </form>
 
             <div style="text-align: center; margin-top: 16px;">
                 <a href="javascript:void(0)" style="font-size: 12px; color: #38bdf8; text-decoration: none;" onclick="openModal('findPwModal')">비밀번호 변경/찾기</a>
@@ -1467,6 +1469,45 @@
             return userAccountsList;
         }
 
+        // 지능형 계약이력 안전 병합 함수 (로컬에 저장된 이력을 서버 데이터가 덮어써서 날리지 않도록 완벽 보존)
+        function mergeContractHistories(localHist, serverHist) {
+            let result = {};
+
+            // 1. 서버에 있는 이력 먼저 적재
+            if (serverHist && typeof serverHist === 'object') {
+                for (let k in serverHist) {
+                    if (Array.isArray(serverHist[k])) {
+                        result[k] = [...serverHist[k]];
+                    }
+                }
+            }
+
+            // 2. 로컬 브라우저에 저장된 이력을 합쳐서 보존
+            if (localHist && typeof localHist === 'object') {
+                for (let k in localHist) {
+                    if (!result[k] || !Array.isArray(result[k])) {
+                        result[k] = Array.isArray(localHist[k]) ? [...localHist[k]] : [];
+                    } else if (Array.isArray(localHist[k])) {
+                        localHist[k].forEach(loc => {
+                            let exists = result[k].some(m => m.type === loc.type && m.date === loc.date);
+                            if (!exists) {
+                                result[k].push(loc);
+                            }
+                        });
+                    }
+                }
+            }
+
+            // 3. 모든 이력을 과거 -> 최신 날짜 순(오름차순)으로 정렬
+            for (let k in result) {
+                if (Array.isArray(result[k])) {
+                    result[k].sort((a, b) => (a.date || a.startDate || '').localeCompare(b.date || b.startDate || ''));
+                }
+            }
+
+            return result;
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
             try {
                 let savedCust = localStorage.getItem('cms_cust_list');
@@ -1488,6 +1529,15 @@
                 if (savedPayLog) payEditLogMap = JSON.parse(savedPayLog);
                 if (savedBatch) uploadBatchList = JSON.parse(savedBatch);
                 if (savedTrash) deletedCustomerTrashList = JSON.parse(savedTrash);
+
+                // 고객 목록에 저장된 자체 이력이 있다면 contractHistoryMap과 동기화
+                customerDataList.forEach(c => {
+                    if (c.histories && Array.isArray(c.histories) && c.histories.length > 0) {
+                        if (!contractHistoryMap[c.no] || contractHistoryMap[c.no].length === 0) {
+                            contractHistoryMap[c.no] = [...c.histories];
+                        }
+                    }
+                });
 
                 if (localStorage.getItem('saved_login_checked') === 'true') {
                     const idEl = document.getElementById('kcd_login_id');
@@ -1532,22 +1582,15 @@
                         customerDataList = data.customers || customerDataList;
                         paymentDataMap = data.payments || paymentDataMap;
                         
-                        // [핵심 해결] Firebase의 빈 histories로 로컬스토리지 데이터를 덮어써서 날리지 않도록 지능형 병합(Smart Merge) 적용
-                        let serverHist = data.histories || {};
-                        for (let k in contractHistoryMap) {
-                            if (!serverHist[k] || serverHist[k].length === 0) {
-                                serverHist[k] = contractHistoryMap[k];
-                            } else {
-                                let merged = [...serverHist[k]];
-                                (contractHistoryMap[k] || []).forEach(localItem => {
-                                    let exists = merged.some(m => m.type === localItem.type && m.date === localItem.date);
-                                    if (!exists) merged.push(localItem);
-                                });
-                                merged.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                                serverHist[k] = merged;
+                        // [핵심] Firebase 데이터 수신 시 로컬 데이터를 절대 삭제하지 않고 안전하게 양방향 병합
+                        contractHistoryMap = mergeContractHistories(contractHistoryMap, data.histories);
+
+                        // 고객 객체에 이력 업데이트 보장
+                        customerDataList.forEach(c => {
+                            if (contractHistoryMap[c.no]) {
+                                c.histories = contractHistoryMap[c.no];
                             }
-                        }
-                        contractHistoryMap = serverHist;
+                        });
 
                         billingDataList = data.billings || billingDataList;
                         docDataMap = data.docs || docDataMap;
@@ -2285,6 +2328,11 @@
             dataList.forEach((item) => {
                 let statusBadge = item.status === '사용' ? '<span class="badge-status badge-use">사용</span>' : '<span class="badge-status badge-stop">'+item.status+'</span>';
                 
+                // 고객 자체 이력이 있고 contractHistoryMap이 비어있다면 복원
+                if ((!contractHistoryMap[item.no] || contractHistoryMap[item.no].length === 0) && item.histories && item.histories.length > 0) {
+                    contractHistoryMap[item.no] = [...item.histories];
+                }
+
                 // 최초 청구시작일 이력 초기화 보장
                 if ((!contractHistoryMap[item.no] || contractHistoryMap[item.no].length === 0) && item.startDate) {
                     contractHistoryMap[item.no] = [{
@@ -2293,6 +2341,7 @@
                         memo: '청구시작일(최초 계약일) 자동연동',
                         fileName: ''
                     }];
+                    item.histories = [...contractHistoryMap[item.no]];
                 }
 
                 // 날짜 오름차순 정렬 (과거 날짜 -> 최신 날짜 순)
@@ -2357,6 +2406,7 @@
                     memo: '청구시작일(최초 계약일) 자동연동',
                     fileName: ''
                 }];
+                item.histories = [...contractHistoryMap[no]];
             }
 
             renderContractHistoryModalList(no);
@@ -2407,7 +2457,7 @@
             container.innerHTML = html;
         }
 
-        // 계약이력 추가 저장 함수 (로컬스토리지 즉시 저장 및 지능형 병합)
+        // 계약이력 추가 저장 함수 (로컬스토리지 및 고객 객체 이중 백업 저장)
         function saveContractHistory() {
             let no = document.getElementById('h_cust_no').value;
             if (!no) { alert("고객 정보가 올바르지 않습니다."); return; }
@@ -2427,6 +2477,7 @@
                 contractHistoryMap[no] = [];
             }
 
+            // 신규 이력 추가
             contractHistoryMap[no].push({
                 type: type,
                 date: date,
@@ -2441,12 +2492,15 @@
                 return dA.localeCompare(dB);
             });
 
-            // 가장 마지막(최신 날짜) 이력의 상태를 고객 계약상태로 갱신
+            // 고객 객체 자체에도 이중 보존 & 상태 갱신
             let cust = customerDataList.find(c => c.no === no);
-            if (cust && contractHistoryMap[no].length > 0) {
-                let latestItem = contractHistoryMap[no][contractHistoryMap[no].length - 1];
-                if (latestItem.type === '사용' || latestItem.type === '중지') {
-                    cust.status = latestItem.type;
+            if (cust) {
+                cust.histories = [...contractHistoryMap[no]];
+                if (contractHistoryMap[no].length > 0) {
+                    let latestItem = contractHistoryMap[no][contractHistoryMap[no].length - 1];
+                    if (latestItem.type === '사용' || latestItem.type === '중지') {
+                        cust.status = latestItem.type;
+                    }
                 }
             }
 
@@ -2478,10 +2532,13 @@
             contractHistoryMap[no].splice(idx, 1);
             
             let cust = customerDataList.find(c => c.no === no);
-            if (cust && contractHistoryMap[no].length > 0) {
-                let latestItem = contractHistoryMap[no][contractHistoryMap[no].length - 1];
-                if (latestItem.type === '사용' || latestItem.type === '중지') {
-                    cust.status = latestItem.type;
+            if (cust) {
+                cust.histories = [...contractHistoryMap[no]];
+                if (contractHistoryMap[no].length > 0) {
+                    let latestItem = contractHistoryMap[no][contractHistoryMap[no].length - 1];
+                    if (latestItem.type === '사용' || latestItem.type === '중지') {
+                        cust.status = latestItem.type;
+                    }
                 }
             }
 
@@ -2516,10 +2573,13 @@
             });
 
             let cust = customerDataList.find(c => c.no === custNo);
-            if (cust && contractHistoryMap[custNo].length > 0) {
-                let latestItem = contractHistoryMap[custNo][contractHistoryMap[custNo].length - 1];
-                if (latestItem.type === '사용' || latestItem.type === '중지') {
-                    cust.status = latestItem.type;
+            if (cust) {
+                cust.histories = [...contractHistoryMap[custNo]];
+                if (contractHistoryMap[custNo].length > 0) {
+                    let latestItem = contractHistoryMap[custNo][contractHistoryMap[custNo].length - 1];
+                    if (latestItem.type === '사용' || latestItem.type === '중지') {
+                        cust.status = latestItem.type;
+                    }
                 }
             }
 
@@ -2540,6 +2600,12 @@
             if (!confirm("해당 계약 이력을 삭제하시겠습니까?")) return;
 
             contractHistoryMap[custNo].splice(hIdx, 1);
+            
+            let cust = customerDataList.find(c => c.no === custNo);
+            if (cust) {
+                cust.histories = [...contractHistoryMap[custNo]];
+            }
+
             logEditRecord('CUST', custNo, `계약이력 삭제`);
 
             filterCustomerTable();
@@ -2758,6 +2824,7 @@
                     fileName: ''
                 });
                 contractHistoryMap[item.no].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                item.histories = [...contractHistoryMap[item.no]];
                 logEditRecord('CUST', item.no, `상품금액 변경 (${oldAmt.toLocaleString()}원 -> ${newAmt.toLocaleString()}원)`);
             }
 
@@ -2770,6 +2837,7 @@
                     fileName: ''
                 });
                 contractHistoryMap[item.no].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                item.histories = [...contractHistoryMap[item.no]];
                 logEditRecord('CUST', item.no, `영업수수료 변경 (${oldComm.toLocaleString()}원 -> ${newComm.toLocaleString()}원)`);
             }
 
@@ -2985,14 +3053,15 @@
             let startD = document.getElementById('m_start').value;
             let statusVal = document.getElementById('m_status').value;
 
+            let initialHist = [];
             if (no && startD) {
-                if (!contractHistoryMap[no]) contractHistoryMap[no] = [];
-                contractHistoryMap[no].push({
+                initialHist.push({
                     type: statusVal || '사용',
                     date: startD,
                     memo: '신규등록 시 청구시작일 자동연동',
                     fileName: ''
                 });
+                contractHistoryMap[no] = [...initialHist];
             }
 
             customerDataList.unshift({
@@ -3007,7 +3076,8 @@
                 type: document.getElementById('m_type').value.trim() || '미지정',
                 agency: document.getElementById('m_agency').value.trim() || '-',
                 store: document.getElementById('m_store').value.trim() || '-',
-                manager: document.getElementById('m_manager').value.trim() || '-'
+                manager: document.getElementById('m_manager').value.trim() || '-',
+                histories: initialHist
             });
 
             logEditRecord('CUST', no, `신규 고객 수동 등록 (${name})`);
