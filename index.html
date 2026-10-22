@@ -266,7 +266,7 @@
 </head>
 <body>
 
-    <!-- 단색 전체화면 최초 로그인 화면 -->
+    <!-- 단색 전체화면 최초 로그인 페이지 -->
     <div id="loginPageContainer">
         <div class="login-box-card">
             <div class="login-brand-head">CMS ERP System</div>
@@ -1469,36 +1469,38 @@
             return userAccountsList;
         }
 
-        // 지능형 계약이력 안전 병합 함수 (로컬에 저장된 이력을 서버 데이터가 덮어써서 날리지 않도록 완벽 보존)
+        // [핵심 보완] 계약이력 완전 양방향 합치기 (로컬 내역 100% 보존)
         function mergeContractHistories(localHist, serverHist) {
             let result = {};
 
-            // 1. 서버에 있는 이력 먼저 적재
+            // 1. 서버 이력 적재
             if (serverHist && typeof serverHist === 'object') {
                 for (let k in serverHist) {
+                    let cleanKey = String(k).trim();
                     if (Array.isArray(serverHist[k])) {
-                        result[k] = [...serverHist[k]];
+                        result[cleanKey] = [...serverHist[k]];
                     }
                 }
             }
 
-            // 2. 로컬 브라우저에 저장된 이력을 합쳐서 보존
+            // 2. 로컬 브라우저 이력 무조건 보존
             if (localHist && typeof localHist === 'object') {
                 for (let k in localHist) {
-                    if (!result[k] || !Array.isArray(result[k])) {
-                        result[k] = Array.isArray(localHist[k]) ? [...localHist[k]] : [];
+                    let cleanKey = String(k).trim();
+                    if (!result[cleanKey] || !Array.isArray(result[cleanKey])) {
+                        result[cleanKey] = Array.isArray(localHist[k]) ? [...localHist[k]] : [];
                     } else if (Array.isArray(localHist[k])) {
                         localHist[k].forEach(loc => {
-                            let exists = result[k].some(m => m.type === loc.type && m.date === loc.date);
+                            let exists = result[cleanKey].some(m => m.type === loc.type && m.date === loc.date);
                             if (!exists) {
-                                result[k].push(loc);
+                                result[cleanKey].push(loc);
                             }
                         });
                     }
                 }
             }
 
-            // 3. 모든 이력을 과거 -> 최신 날짜 순(오름차순)으로 정렬
+            // 3. 날짜 오름차순 정렬
             for (let k in result) {
                 if (Array.isArray(result[k])) {
                     result[k].sort((a, b) => (a.date || a.startDate || '').localeCompare(b.date || b.startDate || ''));
@@ -1530,11 +1532,12 @@
                 if (savedBatch) uploadBatchList = JSON.parse(savedBatch);
                 if (savedTrash) deletedCustomerTrashList = JSON.parse(savedTrash);
 
-                // 고객 목록에 저장된 자체 이력이 있다면 contractHistoryMap과 동기화
+                // 고객 자체 histories 복원
                 customerDataList.forEach(c => {
+                    let key = String(c.no).trim();
                     if (c.histories && Array.isArray(c.histories) && c.histories.length > 0) {
-                        if (!contractHistoryMap[c.no] || contractHistoryMap[c.no].length === 0) {
-                            contractHistoryMap[c.no] = [...c.histories];
+                        if (!contractHistoryMap[key] || contractHistoryMap[key].length < c.histories.length) {
+                            contractHistoryMap[key] = [...c.histories];
                         }
                     }
                 });
@@ -1582,13 +1585,13 @@
                         customerDataList = data.customers || customerDataList;
                         paymentDataMap = data.payments || paymentDataMap;
                         
-                        // [핵심] Firebase 데이터 수신 시 로컬 데이터를 절대 삭제하지 않고 안전하게 양방향 병합
+                        // 지능형 병합으로 로컬에서 등록한 내역 100% 보존
                         contractHistoryMap = mergeContractHistories(contractHistoryMap, data.histories);
 
-                        // 고객 객체에 이력 업데이트 보장
                         customerDataList.forEach(c => {
-                            if (contractHistoryMap[c.no]) {
-                                c.histories = contractHistoryMap[c.no];
+                            let key = String(c.no).trim();
+                            if (contractHistoryMap[key]) {
+                                c.histories = contractHistoryMap[key];
                             }
                         });
 
@@ -2322,30 +2325,31 @@
             managerSelect.value = managers.includes(currentManager) ? currentManager : 'ALL';
         }
 
-        // 고객관리 테이블 렌더링 (과거 날짜가 위, 최신 날짜가 아래로 정렬)
+        // [핵심 해결] 고객관리 테이블 렌더링 시 기존 이력 절대 덮어쓰지 않음
         function renderCustomerTable(dataList) {
             let tbody = "";
             dataList.forEach((item) => {
+                let key = String(item.no).trim();
                 let statusBadge = item.status === '사용' ? '<span class="badge-status badge-use">사용</span>' : '<span class="badge-status badge-stop">'+item.status+'</span>';
                 
-                // 고객 자체 이력이 있고 contractHistoryMap이 비어있다면 복원
-                if ((!contractHistoryMap[item.no] || contractHistoryMap[item.no].length === 0) && item.histories && item.histories.length > 0) {
-                    contractHistoryMap[item.no] = [...item.histories];
+                // 1. 고객 객체에 저장된 histories 우선 복원
+                if ((!contractHistoryMap[key] || contractHistoryMap[key].length === 0) && item.histories && item.histories.length > 0) {
+                    contractHistoryMap[key] = [...item.histories];
                 }
 
-                // 최초 청구시작일 이력 초기화 보장
-                if ((!contractHistoryMap[item.no] || contractHistoryMap[item.no].length === 0) && item.startDate) {
-                    contractHistoryMap[item.no] = [{
-                        type: item.status || '사용',
+                // 2. 이력이 아예 아예 비어있는 경우에만 청구시작일로 최초 생성 (기존 이력이 존재하면 건너뜀)
+                if ((!contractHistoryMap[key] || contractHistoryMap[key].length === 0) && item.startDate) {
+                    contractHistoryMap[key] = [{
+                        type: '사용',
                         date: item.startDate,
                         memo: '청구시작일(최초 계약일) 자동연동',
                         fileName: ''
                     }];
-                    item.histories = [...contractHistoryMap[item.no]];
+                    item.histories = [...contractHistoryMap[key]];
                 }
 
                 // 날짜 오름차순 정렬 (과거 날짜 -> 최신 날짜 순)
-                let hList = (contractHistoryMap[item.no] || []).slice().sort((a, b) => {
+                let hList = (contractHistoryMap[key] || []).slice().sort((a, b) => {
                     let dA = a.date || a.startDate || '';
                     let dB = b.date || b.startDate || '';
                     return dA.localeCompare(dB);
@@ -2391,25 +2395,29 @@
             document.getElementById('selectAllCustomer').checked = false;
         }
 
-        // 계약이력 모달 팝업 열기
+        // [핵심 해결] 모달 오픈 시 기존 이력 절대 덮어쓰지 않음
         function openContractHistoryModal(no) {
-            let item = customerDataList.find(x => x.no === no);
+            let key = String(no).trim();
+            let item = customerDataList.find(x => String(x.no).trim() === key);
             if (!item) return;
 
-            document.getElementById('h_cust_no').value = item.no;
-            document.getElementById('h_cust_info').innerText = `[${item.no}] ${item.name} - 계약이력 관리`;
+            document.getElementById('h_cust_no').value = key;
+            document.getElementById('h_cust_info').innerText = `[${key}] ${item.name} - 계약이력 관리`;
 
-            if ((!contractHistoryMap[no] || contractHistoryMap[no].length === 0) && item.startDate) {
-                contractHistoryMap[no] = [{
-                    type: item.status || '사용',
+            // 이력이 아예 없을 때만 최초 연동
+            if ((!contractHistoryMap[key] || contractHistoryMap[key].length === 0) && item.histories && item.histories.length > 0) {
+                contractHistoryMap[key] = [...item.histories];
+            } else if ((!contractHistoryMap[key] || contractHistoryMap[key].length === 0) && item.startDate) {
+                contractHistoryMap[key] = [{
+                    type: '사용',
                     date: item.startDate,
                     memo: '청구시작일(최초 계약일) 자동연동',
                     fileName: ''
                 }];
-                item.histories = [...contractHistoryMap[no]];
+                item.histories = [...contractHistoryMap[key]];
             }
 
-            renderContractHistoryModalList(no);
+            renderContractHistoryModalList(key);
 
             document.getElementById('h_type').value = '사용';
             document.getElementById('h_date').value = '';
@@ -2420,11 +2428,11 @@
             openModal('contractHistoryModal');
         }
 
-        // 계약이력 모달 목록 렌더링 (과거 -> 최신 날짜 순 정렬)
         function renderContractHistoryModalList(no) {
+            let key = String(no).trim();
             let container = document.getElementById('historyListContainer');
             
-            let list = (contractHistoryMap[no] || []).slice().sort((a, b) => {
+            let list = (contractHistoryMap[key] || []).slice().sort((a, b) => {
                 let dA = a.date || a.startDate || '';
                 let dB = b.date || b.startDate || '';
                 return dA.localeCompare(dB);
@@ -2450,17 +2458,17 @@
                             </div>
                             ${memoHtml}
                         </div>
-                        <button type="button" class="btn-danger editable-only" style="font-size:11px; padding:2px 6px; margin-left:8px;" onclick="deleteContractHistoryItem('${no}', ${idx})">삭제</button>
+                        <button type="button" class="btn-danger editable-only" style="font-size:11px; padding:2px 6px; margin-left:8px;" onclick="deleteContractHistoryItem('${key}', ${idx})">삭제</button>
                     </div>
                 `;
             });
             container.innerHTML = html;
         }
 
-        // 계약이력 추가 저장 함수 (로컬스토리지 및 고객 객체 이중 백업 저장)
         function saveContractHistory() {
-            let no = document.getElementById('h_cust_no').value;
-            if (!no) { alert("고객 정보가 올바르지 않습니다."); return; }
+            let rawNo = document.getElementById('h_cust_no').value;
+            if (!rawNo) { alert("고객 정보가 올바르지 않습니다."); return; }
+            let no = String(rawNo).trim();
 
             let type = document.getElementById('h_type').value;
             let date = document.getElementById('h_date').value;
@@ -2477,7 +2485,6 @@
                 contractHistoryMap[no] = [];
             }
 
-            // 신규 이력 추가
             contractHistoryMap[no].push({
                 type: type,
                 date: date,
@@ -2485,15 +2492,13 @@
                 fileName: fileName
             });
 
-            // 날짜 오름차순(과거->최신)으로 정렬
             contractHistoryMap[no].sort((a, b) => {
                 let dA = a.date || a.startDate || '';
                 let dB = b.date || b.startDate || '';
                 return dA.localeCompare(dB);
             });
 
-            // 고객 객체 자체에도 이중 보존 & 상태 갱신
-            let cust = customerDataList.find(c => c.no === no);
+            let cust = customerDataList.find(c => String(c.no).trim() === no);
             if (cust) {
                 cust.histories = [...contractHistoryMap[no]];
                 if (contractHistoryMap[no].length > 0) {
@@ -2506,7 +2511,6 @@
 
             logEditRecord('CUST', no, `계약이력 추가 (${type}, ${date}${memo ? ', ' + memo : ''})`);
 
-            // 모달 및 메인 테이블 갱신
             renderContractHistoryModalList(no);
             
             document.getElementById('h_date').value = '';
@@ -2519,7 +2523,6 @@
             updateKPIs();
             renderDashboardCharts();
 
-            // 로컬스토리지 및 Firebase 영구 보존
             saveLocalStorage();
             syncToFirebase();
 
@@ -2528,23 +2531,24 @@
 
         function deleteContractHistoryItem(no, idx) {
             if (!confirm("해당 계약 이력을 삭제하시겠습니까?")) return;
+            let key = String(no).trim();
 
-            contractHistoryMap[no].splice(idx, 1);
+            contractHistoryMap[key].splice(idx, 1);
             
-            let cust = customerDataList.find(c => c.no === no);
+            let cust = customerDataList.find(c => String(c.no).trim() === key);
             if (cust) {
-                cust.histories = [...contractHistoryMap[no]];
-                if (contractHistoryMap[no].length > 0) {
-                    let latestItem = contractHistoryMap[no][contractHistoryMap[no].length - 1];
+                cust.histories = [...contractHistoryMap[key]];
+                if (contractHistoryMap[key].length > 0) {
+                    let latestItem = contractHistoryMap[key][contractHistoryMap[key].length - 1];
                     if (latestItem.type === '사용' || latestItem.type === '중지') {
                         cust.status = latestItem.type;
                     }
                 }
             }
 
-            logEditRecord('CUST', no, `계약이력 항목 삭제`);
+            logEditRecord('CUST', key, `계약이력 항목 삭제`);
 
-            renderContractHistoryModalList(no);
+            renderContractHistoryModalList(key);
             filterCustomerTable();
             renderHistoryManagerTable();
             updateTabBadges();
@@ -2556,34 +2560,35 @@
         }
 
         function updateSingleHistory(custNo, hIdx) {
-            let typeEl = document.getElementById(`hm_type_${custNo}_${hIdx}`);
-            let dateEl = document.getElementById(`hm_date_${custNo}_${hIdx}`);
-            let memoEl = document.getElementById(`hm_memo_${custNo}_${hIdx}`);
+            let key = String(custNo).trim();
+            let typeEl = document.getElementById(`hm_type_${key}_${hIdx}`);
+            let dateEl = document.getElementById(`hm_date_${key}_${hIdx}`);
+            let memoEl = document.getElementById(`hm_memo_${key}_${hIdx}`);
 
-            if (!contractHistoryMap[custNo] || !contractHistoryMap[custNo][hIdx]) return;
+            if (!contractHistoryMap[key] || !contractHistoryMap[key][hIdx]) return;
 
-            contractHistoryMap[custNo][hIdx].type = typeEl.value;
-            contractHistoryMap[custNo][hIdx].date = dateEl.value;
-            contractHistoryMap[custNo][hIdx].memo = memoEl.value.trim();
+            contractHistoryMap[key][hIdx].type = typeEl.value;
+            contractHistoryMap[key][hIdx].date = dateEl.value;
+            contractHistoryMap[key][hIdx].memo = memoEl.value.trim();
 
-            contractHistoryMap[custNo].sort((a, b) => {
+            contractHistoryMap[key].sort((a, b) => {
                 let dA = a.date || a.startDate || '';
                 let dB = b.date || b.startDate || '';
                 return dA.localeCompare(dB);
             });
 
-            let cust = customerDataList.find(c => c.no === custNo);
+            let cust = customerDataList.find(c => String(c.no).trim() === key);
             if (cust) {
-                cust.histories = [...contractHistoryMap[custNo]];
-                if (contractHistoryMap[custNo].length > 0) {
-                    let latestItem = contractHistoryMap[custNo][contractHistoryMap[custNo].length - 1];
+                cust.histories = [...contractHistoryMap[key]];
+                if (contractHistoryMap[key].length > 0) {
+                    let latestItem = contractHistoryMap[key][contractHistoryMap[key].length - 1];
                     if (latestItem.type === '사용' || latestItem.type === '중지') {
                         cust.status = latestItem.type;
                     }
                 }
             }
 
-            logEditRecord('CUST', custNo, `계약이력 수정 ([${typeEl.value}] ${dateEl.value})`);
+            logEditRecord('CUST', key, `계약이력 수정 ([${typeEl.value}] ${dateEl.value})`);
 
             filterCustomerTable();
             renderHistoryManagerTable();
@@ -2598,15 +2603,16 @@
 
         function deleteSingleHistory(custNo, hIdx) {
             if (!confirm("해당 계약 이력을 삭제하시겠습니까?")) return;
+            let key = String(custNo).trim();
 
-            contractHistoryMap[custNo].splice(hIdx, 1);
+            contractHistoryMap[key].splice(hIdx, 1);
             
-            let cust = customerDataList.find(c => c.no === custNo);
+            let cust = customerDataList.find(c => String(c.no).trim() === key);
             if (cust) {
-                cust.histories = [...contractHistoryMap[custNo]];
+                cust.histories = [...contractHistoryMap[key]];
             }
 
-            logEditRecord('CUST', custNo, `계약이력 삭제`);
+            logEditRecord('CUST', key, `계약이력 삭제`);
 
             filterCustomerTable();
             renderHistoryManagerTable();
@@ -2621,13 +2627,14 @@
 
         // 관련 서류 모달
         function openDocModal(no) {
-            let item = customerDataList.find(x => x.no === no);
+            let key = String(no).trim();
+            let item = customerDataList.find(x => String(x.no).trim() === key);
             if (!item) return;
 
-            document.getElementById('doc_cust_no').value = item.no;
-            document.getElementById('doc_cust_info').innerText = `[${item.no}] ${item.name} - 관련서류 파일 관리`;
+            document.getElementById('doc_cust_no').value = key;
+            document.getElementById('doc_cust_info').innerText = `[${key}] ${item.name} - 관련서류 파일 관리`;
 
-            renderDocModalList(no);
+            renderDocModalList(key);
             document.getElementById('doc_name').value = '';
             let fileEl = document.getElementById('doc_file_input');
             if (fileEl) fileEl.value = '';
@@ -2636,8 +2643,9 @@
         }
 
         function renderDocModalList(no) {
+            let key = String(no).trim();
             let container = document.getElementById('docListContainer');
-            let list = docDataMap[no] || [];
+            let list = docDataMap[key] || [];
 
             if (list.length === 0) {
                 container.innerHTML = `<div style="text-align:center; color:#94a3b8; padding:20px;">등록된 서류가 없습니다.</div>`;
@@ -2653,7 +2661,7 @@
                             <span style="font-size:11px; color:#64748b; margin-left:8px;">(${d.fileName || '첨부파일'})</span>
                             <div style="font-size:10px; color:#94a3b8;">${d.date}</div>
                         </div>
-                        <button type="button" class="btn-danger editable-only" style="font-size:11px; padding:2px 6px;" onclick="deleteDocItem('${no}', ${idx})">삭제</button>
+                        <button type="button" class="btn-danger editable-only" style="font-size:11px; padding:2px 6px;" onclick="deleteDocItem('${key}', ${idx})">삭제</button>
                     </div>
                 `;
             });
@@ -2661,7 +2669,8 @@
         }
 
         function saveDocRecord() {
-            let no = document.getElementById('doc_cust_no').value;
+            let rawNo = document.getElementById('doc_cust_no').value;
+            let no = String(rawNo).trim();
             let name = document.getElementById('doc_name').value.trim();
             let fileInput = document.getElementById('doc_file_input');
             let fileName = fileInput.files && fileInput.files[0] ? fileInput.files[0].name : '';
@@ -2693,21 +2702,23 @@
 
         function deleteDocItem(no, idx) {
             if (!confirm("해당 서류를 삭제하시겠습니까?")) return;
-            docDataMap[no].splice(idx, 1);
-            renderDocModalList(no);
+            let key = String(no).trim();
+            docDataMap[key].splice(idx, 1);
+            renderDocModalList(key);
             saveLocalStorage();
             syncToFirebase();
         }
 
         // 상담 내역 모달
         function openCounselModal(no) {
-            let item = customerDataList.find(x => x.no === no);
+            let key = String(no).trim();
+            let item = customerDataList.find(x => String(x.no).trim() === key);
             if (!item) return;
 
-            document.getElementById('counsel_cust_no').value = item.no;
-            document.getElementById('counsel_cust_info').innerText = `[${item.no}] ${item.name} - 고객 상담 내역 관리`;
+            document.getElementById('counsel_cust_no').value = key;
+            document.getElementById('counsel_cust_info').innerText = `[${key}] ${item.name} - 고객 상담 내역 관리`;
 
-            renderCounselModalList(no);
+            renderCounselModalList(key);
             document.getElementById('counsel_date').value = new Date().toISOString().split('T')[0];
             document.getElementById('counsel_type').value = '전화상담';
             document.getElementById('counsel_text').value = '';
@@ -2716,8 +2727,9 @@
         }
 
         function renderCounselModalList(no) {
+            let key = String(no).trim();
             let container = document.getElementById('counselListContainer');
-            let list = counselDataMap[no] || [];
+            let list = counselDataMap[key] || [];
 
             if (list.length === 0) {
                 container.innerHTML = `<div style="text-align:center; color:#94a3b8; padding:20px;">등록된 상담내역이 없습니다.</div>`;
@@ -2735,7 +2747,7 @@
                             </div>
                             <div style="font-size:12px; color:#1e293b; margin-top:3px;">${c.text}</div>
                         </div>
-                        <button type="button" class="btn-danger editable-only" style="font-size:11px; padding:2px 6px; margin-left:8px;" onclick="deleteCounselItem('${no}', ${idx})">삭제</button>
+                        <button type="button" class="btn-danger editable-only" style="font-size:11px; padding:2px 6px; margin-left:8px;" onclick="deleteCounselItem('${key}', ${idx})">삭제</button>
                     </div>
                 `;
             });
@@ -2743,7 +2755,8 @@
         }
 
         function saveCounselRecord() {
-            let no = document.getElementById('counsel_cust_no').value;
+            let rawNo = document.getElementById('counsel_cust_no').value;
+            let no = String(rawNo).trim();
             let date = document.getElementById('counsel_date').value;
             let type = document.getElementById('counsel_type').value;
             let text = document.getElementById('counsel_text').value.trim();
@@ -2773,8 +2786,9 @@
 
         function deleteCounselItem(no, idx) {
             if (!confirm("해당 상담 내역을 삭제하시겠습니까?")) return;
-            counselDataMap[no].splice(idx, 1);
-            renderCounselModalList(no);
+            let key = String(no).trim();
+            counselDataMap[key].splice(idx, 1);
+            renderCounselModalList(key);
             saveLocalStorage();
             syncToFirebase();
         }
@@ -2815,33 +2829,35 @@
             item.store = document.getElementById('edit_store').value.trim();
             item.manager = document.getElementById('edit_manager').value.trim();
 
+            let key = String(item.no).trim();
+
             if (oldAmt !== newAmt) {
-                if (!contractHistoryMap[item.no]) contractHistoryMap[item.no] = [];
-                contractHistoryMap[item.no].push({
+                if (!contractHistoryMap[key]) contractHistoryMap[key] = [];
+                contractHistoryMap[key].push({
                     type: '상품금액변경',
                     date: todayStr,
                     memo: `상품금액 변경: ${oldAmt.toLocaleString()}원 -> ${newAmt.toLocaleString()}원`,
                     fileName: ''
                 });
-                contractHistoryMap[item.no].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                item.histories = [...contractHistoryMap[item.no]];
-                logEditRecord('CUST', item.no, `상품금액 변경 (${oldAmt.toLocaleString()}원 -> ${newAmt.toLocaleString()}원)`);
+                contractHistoryMap[key].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                item.histories = [...contractHistoryMap[key]];
+                logEditRecord('CUST', key, `상품금액 변경 (${oldAmt.toLocaleString()}원 -> ${newAmt.toLocaleString()}원)`);
             }
 
             if (oldComm !== newComm) {
-                if (!contractHistoryMap[item.no]) contractHistoryMap[item.no] = [];
-                contractHistoryMap[item.no].push({
+                if (!contractHistoryMap[key]) contractHistoryMap[key] = [];
+                contractHistoryMap[key].push({
                     type: '영업수수료변경',
                     date: todayStr,
                     memo: `영업수수료 변경: ${oldComm.toLocaleString()}원 -> ${newComm.toLocaleString()}원`,
                     fileName: ''
                 });
-                contractHistoryMap[item.no].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                item.histories = [...contractHistoryMap[item.no]];
-                logEditRecord('CUST', item.no, `영업수수료 변경 (${oldComm.toLocaleString()}원 -> ${newComm.toLocaleString()}원)`);
+                contractHistoryMap[key].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                item.histories = [...contractHistoryMap[key]];
+                logEditRecord('CUST', key, `영업수수료 변경 (${oldComm.toLocaleString()}원 -> ${newComm.toLocaleString()}원)`);
             }
 
-            logEditRecord('CUST', item.no, `고객 세부정보 업데이트 저장`);
+            logEditRecord('CUST', key, `고객 세부정보 업데이트 저장`);
 
             updateSelectOptions();
             updateTabBadges();
@@ -2855,11 +2871,12 @@
         }
 
         function openPaymentDetailModal(no) {
-            let item = customerDataList.find(x => x.no === no);
+            let key = String(no).trim();
+            let item = customerDataList.find(x => String(x.no).trim() === key);
             if (!item) return;
 
-            document.getElementById('p_edit_no').value = item.no;
-            document.getElementById('m_card_no').innerText = item.no;
+            document.getElementById('p_edit_no').value = key;
+            document.getElementById('m_card_no').innerText = key;
             document.getElementById('m_card_name').innerText = item.name;
             
             let statusBadge = item.status === '사용' 
@@ -2869,8 +2886,8 @@
 
             document.getElementById('p_modal_year_text').innerText = `${currentModalYear}년`;
 
-            renderPaymentModalContent(no);
-            renderPayEditLog(no);
+            renderPaymentModalContent(key);
+            renderPayEditLog(key);
             openModal('paymentDetailModal');
         }
 
@@ -2986,7 +3003,8 @@
             }
 
             let excelRows = exportData.map(item => {
-                let hList = (contractHistoryMap[item.no] || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                let key = String(item.no).trim();
+                let hList = (contractHistoryMap[key] || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 let lastHistory = hList.length > 0 ? `${hList[hList.length - 1].type} (${hList[hList.length - 1].date || hList[hList.length - 1].startDate || '-'})` : '-';
                 return {
                     'NO.': item.idx,
@@ -3056,7 +3074,7 @@
             let initialHist = [];
             if (no && startD) {
                 initialHist.push({
-                    type: statusVal || '사용',
+                    type: '사용',
                     date: startD,
                     memo: '신규등록 시 청구시작일 자동연동',
                     fileName: ''
