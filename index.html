@@ -161,35 +161,6 @@
         .btn-excel { background-color: #fef3c7; border-color: #f59e0b; color: #b45309; }
         .btn-excel:hover { background-color: #fde68a; }
 
-        .container { flex: 1; padding: 24px 28px; overflow-y: auto; }
-        .view-section { display: none; }
-        .view-section.active { display: block; }
-
-        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
-        .kpi-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 18px 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
-        .kpi-title { font-size: 12px; color: var(--text-sub); margin-bottom: 6px; font-weight: 600; }
-        .kpi-value { font-size: 22px; font-weight: 800; color: var(--text-main); }
-
-        .dashboard-grid-2col { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; margin-bottom: 20px; }
-        .dashboard-grid-full { display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 20px; }
-
-        .filter-container-box { background: #ffffff; border: 1px solid var(--border-color); border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 14px; }
-        .status-tab-group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; }
-        .status-tab { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid #cbd5e1; background: #f8fafc; color: #475569; transition: all 0.2s; display: flex; align-items: center; gap: 4px; }
-        .status-tab:hover { background: #e2e8f0; color: #0f172a; }
-        .status-tab.active { background: #2563eb; color: #ffffff; border-color: #2563eb; }
-        .status-tab-badge { background: rgba(255,255,255,0.25); padding: 1px 6px; border-radius: 12px; font-size: 11px; }
-        .status-tab:not(.active) .status-tab-badge { background: #cbd5e1; color: #1e293b; }
-
-        .filter-dropdown-row { display: grid; grid-template-columns: repeat(6, 1fr) auto; gap: 10px; align-items: center; }
-        .filter-group { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #475569; }
-        .filter-group label { white-space: nowrap; }
-        .filter-select { padding: 6px 8px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 6px; outline: none; background: #ffffff; width: 100%; }
-
-        .content-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); margin-bottom: 20px; }
-        .content-card h3 { margin-top: 0; font-size: 15px; color: var(--text-main); margin-bottom: 14px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-        .card-actions { display: flex; gap: 8px; align-items: center; }
-
         .summary-total-strip {
             display: flex;
             align-items: center;
@@ -1312,6 +1283,16 @@
         let chartMonthlyInstance = null;
         let chartAgencyInstance = null;
 
+        // 회원번호 포맷 완벽 규격화 (숫자 2와 문자열 '00000002'의 키 불일치 영구 방지)
+        function normalizeMemberNo(no) {
+            if (no === null || no === undefined) return '';
+            let s = String(no).trim();
+            if (s.length > 0 && !isNaN(s) && /^\d+$/.test(s)) {
+                return s.padStart(8, '0');
+            }
+            return s;
+        }
+
         function normalizeYM(val) {
             if (!val) return '';
             let s = String(val).trim().replace(/[\/\.]/g, '-');
@@ -1388,7 +1369,7 @@
                     let updateCount = 0;
 
                     json.forEach((row, rIdx) => {
-                        let memberNo = String(row['회원번호'] || row['회원 번호'] || '').trim();
+                        let memberNo = normalizeMemberNo(row['회원번호'] || row['회원 번호'] || '');
                         let memberName = String(row['회원명'] || row['가맹점명'] || row['고객명'] || '').trim();
                         let rawMonth = String(row['청구월'] || row['청구 연월'] || '').trim();
                         let rawAmt = String(row['청구금액'] || row['금액'] || '0').replace(/[^0-9]/g, '');
@@ -1402,7 +1383,7 @@
                         if (!normalizedMonth) normalizedMonth = '2026-10';
 
                         let existingIndex = billingDataList.findIndex(b => 
-                            String(b.no).trim() === memberNo && 
+                            normalizeMemberNo(b.no) === memberNo && 
                             normalizeYM(b.month) === normalizedMonth
                         );
 
@@ -1469,24 +1450,22 @@
             return userAccountsList;
         }
 
-        // [핵심 보완] 계약이력 완전 양방향 합치기 (로컬 내역 100% 보존)
+        // 지능형 계약이력 안전 병합 함수 (로컬 이력을 항상 100% 보존)
         function mergeContractHistories(localHist, serverHist) {
             let result = {};
 
-            // 1. 서버 이력 적재
             if (serverHist && typeof serverHist === 'object') {
                 for (let k in serverHist) {
-                    let cleanKey = String(k).trim();
+                    let cleanKey = normalizeMemberNo(k);
                     if (Array.isArray(serverHist[k])) {
                         result[cleanKey] = [...serverHist[k]];
                     }
                 }
             }
 
-            // 2. 로컬 브라우저 이력 무조건 보존
             if (localHist && typeof localHist === 'object') {
                 for (let k in localHist) {
-                    let cleanKey = String(k).trim();
+                    let cleanKey = normalizeMemberNo(k);
                     if (!result[cleanKey] || !Array.isArray(result[cleanKey])) {
                         result[cleanKey] = Array.isArray(localHist[k]) ? [...localHist[k]] : [];
                     } else if (Array.isArray(localHist[k])) {
@@ -1500,7 +1479,6 @@
                 }
             }
 
-            // 3. 날짜 오름차순 정렬
             for (let k in result) {
                 if (Array.isArray(result[k])) {
                     result[k].sort((a, b) => (a.date || a.startDate || '').localeCompare(b.date || b.startDate || ''));
@@ -1532,9 +1510,16 @@
                 if (savedBatch) uploadBatchList = JSON.parse(savedBatch);
                 if (savedTrash) deletedCustomerTrashList = JSON.parse(savedTrash);
 
-                // 고객 자체 histories 복원
+                // 회원번호 키 규격 정규화 보장
+                let normalizedHistMap = {};
+                for (let k in contractHistoryMap) {
+                    normalizedHistMap[normalizeMemberNo(k)] = contractHistoryMap[k];
+                }
+                contractHistoryMap = normalizedHistMap;
+
                 customerDataList.forEach(c => {
-                    let key = String(c.no).trim();
+                    let key = normalizeMemberNo(c.no);
+                    c.no = key; // 회원번호 형식을 규격화된 8자리 문자열로 통일
                     if (c.histories && Array.isArray(c.histories) && c.histories.length > 0) {
                         if (!contractHistoryMap[key] || contractHistoryMap[key].length < c.histories.length) {
                             contractHistoryMap[key] = [...c.histories];
@@ -1582,14 +1567,19 @@
                     clearTimeout(syncTimeout);
                     const data = snapshot.val();
                     if (data) {
-                        customerDataList = data.customers || customerDataList;
+                        if (data.customers && Array.isArray(data.customers)) {
+                            // 클라우드 데이터를 가져오더라도 회원번호 규격 정규화
+                            data.customers.forEach(c => c.no = normalizeMemberNo(c.no));
+                            customerDataList = data.customers;
+                        }
+
                         paymentDataMap = data.payments || paymentDataMap;
                         
-                        // 지능형 병합으로 로컬에서 등록한 내역 100% 보존
+                        // 서버 데이터 수신 시 로컬 이력을 무조건 양방향 보존 병합
                         contractHistoryMap = mergeContractHistories(contractHistoryMap, data.histories);
 
                         customerDataList.forEach(c => {
-                            let key = String(c.no).trim();
+                            let key = normalizeMemberNo(c.no);
                             if (contractHistoryMap[key]) {
                                 c.histories = contractHistoryMap[key];
                             }
@@ -1911,17 +1901,19 @@
         function getBillingAmountForMonth(no, yearMonthStr) {
             if (!billingDataList || billingDataList.length === 0) return null;
             let targetYM = normalizeYM(yearMonthStr);
-            let match = billingDataList.find(b => String(b.no).trim() === String(no).trim() && normalizeYM(b.month) === targetYM);
+            let targetNo = normalizeMemberNo(no);
+            let match = billingDataList.find(b => normalizeMemberNo(b.no) === targetNo && normalizeYM(b.month) === targetYM);
             return match ? match.amount : null;
         }
 
         function getYearlySummary(no, year) {
             let summary = { paid: 0, settle: 0, unpaid: 0, unsettled: 0 };
-            let pMap = paymentDataMap[no] || {};
+            let key = normalizeMemberNo(no);
+            let pMap = paymentDataMap[key] || paymentDataMap[no] || {};
             for (let m = 1; m <= 12; m++) {
                 let monthKey = `${year}-${String(m).padStart(2, '0')}`;
                 let mData = pMap[monthKey];
-                let bAmt = getBillingAmountForMonth(no, monthKey);
+                let bAmt = getBillingAmountForMonth(key, monthKey);
                 let pAmt = bAmt !== null ? bAmt : 0;
                 
                 if (mData) {
@@ -1939,14 +1931,15 @@
         }
 
         function renderPaymentModalContent(no) {
+            let key = normalizeMemberNo(no);
             let tbodyHtml = '';
-            let pMap = paymentDataMap[no] || {};
+            let pMap = paymentDataMap[key] || paymentDataMap[no] || {};
             let sums = { bill: 0, comm: 0, paid: 0, settle: 0, unpaid: 0, unsettled: 0 };
 
             for (let m = 1; m <= 12; m++) {
                 let monthKey = `${currentModalYear}-${String(m).padStart(2, '0')}`;
                 let mData = pMap[monthKey] || { paid: 0, settle: 0 };
-                let bAmt = getBillingAmountForMonth(no, monthKey) || 0;
+                let bAmt = getBillingAmountForMonth(key, monthKey) || 0;
                 let unpaidVal = Math.max(0, bAmt - (mData.paid || 0));
                 let unsettledVal = Math.max(0, (mData.paid || 0) - (mData.settle || 0));
 
@@ -2073,7 +2066,7 @@
             let yearPrefix = selectedYM.split('-')[0];
 
             customerDataList.forEach(c => {
-                let userPayMap = paymentDataMap[c.no] || {};
+                let userPayMap = paymentDataMap[normalizeMemberNo(c.no)] || paymentDataMap[c.no] || {};
                 for (let m = 1; m <= 12; m++) {
                     let monthKey = `${yearPrefix}-${String(m).padStart(2, '0')}`;
                     let mData = userPayMap[monthKey] || {};
@@ -2325,19 +2318,19 @@
             managerSelect.value = managers.includes(currentManager) ? currentManager : 'ALL';
         }
 
-        // [핵심 해결] 고객관리 테이블 렌더링 시 기존 이력 절대 덮어쓰지 않음
+        // 고객관리 테이블 렌더링 (과거 날짜가 위, 최신 날짜가 아래로 정렬)
         function renderCustomerTable(dataList) {
             let tbody = "";
             dataList.forEach((item) => {
-                let key = String(item.no).trim();
+                let key = normalizeMemberNo(item.no);
                 let statusBadge = item.status === '사용' ? '<span class="badge-status badge-use">사용</span>' : '<span class="badge-status badge-stop">'+item.status+'</span>';
                 
-                // 1. 고객 객체에 저장된 histories 우선 복원
+                // 1. 고객 자체 이력이 저장되어 있다면 contractHistoryMap으로 복원
                 if ((!contractHistoryMap[key] || contractHistoryMap[key].length === 0) && item.histories && item.histories.length > 0) {
                     contractHistoryMap[key] = [...item.histories];
                 }
 
-                // 2. 이력이 아예 아예 비어있는 경우에만 청구시작일로 최초 생성 (기존 이력이 존재하면 건너뜀)
+                // 2. 이력이 아예 없을 때만 최초 청구시작일로 자동 연동 생성
                 if ((!contractHistoryMap[key] || contractHistoryMap[key].length === 0) && item.startDate) {
                     contractHistoryMap[key] = [{
                         type: '사용',
@@ -2395,16 +2388,15 @@
             document.getElementById('selectAllCustomer').checked = false;
         }
 
-        // [핵심 해결] 모달 오픈 시 기존 이력 절대 덮어쓰지 않음
+        // 계약이력 모달 팝업 열기
         function openContractHistoryModal(no) {
-            let key = String(no).trim();
-            let item = customerDataList.find(x => String(x.no).trim() === key);
+            let key = normalizeMemberNo(no);
+            let item = customerDataList.find(x => normalizeMemberNo(x.no) === key);
             if (!item) return;
 
             document.getElementById('h_cust_no').value = key;
             document.getElementById('h_cust_info').innerText = `[${key}] ${item.name} - 계약이력 관리`;
 
-            // 이력이 아예 없을 때만 최초 연동
             if ((!contractHistoryMap[key] || contractHistoryMap[key].length === 0) && item.histories && item.histories.length > 0) {
                 contractHistoryMap[key] = [...item.histories];
             } else if ((!contractHistoryMap[key] || contractHistoryMap[key].length === 0) && item.startDate) {
@@ -2429,7 +2421,7 @@
         }
 
         function renderContractHistoryModalList(no) {
-            let key = String(no).trim();
+            let key = normalizeMemberNo(no);
             let container = document.getElementById('historyListContainer');
             
             let list = (contractHistoryMap[key] || []).slice().sort((a, b) => {
@@ -2465,10 +2457,11 @@
             container.innerHTML = html;
         }
 
+        // 계약이력 추가 저장 및 로컬스토리지 최우선 보존
         function saveContractHistory() {
             let rawNo = document.getElementById('h_cust_no').value;
             if (!rawNo) { alert("고객 정보가 올바르지 않습니다."); return; }
-            let no = String(rawNo).trim();
+            let no = normalizeMemberNo(rawNo);
 
             let type = document.getElementById('h_type').value;
             let date = document.getElementById('h_date').value;
@@ -2485,6 +2478,7 @@
                 contractHistoryMap[no] = [];
             }
 
+            // 신규 이력 추가
             contractHistoryMap[no].push({
                 type: type,
                 date: date,
@@ -2492,13 +2486,15 @@
                 fileName: fileName
             });
 
+            // 오름차순(과거->최신) 정렬
             contractHistoryMap[no].sort((a, b) => {
                 let dA = a.date || a.startDate || '';
                 let dB = b.date || b.startDate || '';
                 return dA.localeCompare(dB);
             });
 
-            let cust = customerDataList.find(c => String(c.no).trim() === no);
+            // 고객 객체에도 이중 백업 보존
+            let cust = customerDataList.find(c => normalizeMemberNo(c.no) === no);
             if (cust) {
                 cust.histories = [...contractHistoryMap[no]];
                 if (contractHistoryMap[no].length > 0) {
@@ -2511,6 +2507,7 @@
 
             logEditRecord('CUST', no, `계약이력 추가 (${type}, ${date}${memo ? ', ' + memo : ''})`);
 
+            // 모달 내 목록 및 화면 즉시 반영
             renderContractHistoryModalList(no);
             
             document.getElementById('h_date').value = '';
@@ -2523,6 +2520,7 @@
             updateKPIs();
             renderDashboardCharts();
 
+            // 로컬스토리지 및 클라우드 즉시 영구 저장
             saveLocalStorage();
             syncToFirebase();
 
@@ -2531,11 +2529,11 @@
 
         function deleteContractHistoryItem(no, idx) {
             if (!confirm("해당 계약 이력을 삭제하시겠습니까?")) return;
-            let key = String(no).trim();
+            let key = normalizeMemberNo(no);
 
             contractHistoryMap[key].splice(idx, 1);
             
-            let cust = customerDataList.find(c => String(c.no).trim() === key);
+            let cust = customerDataList.find(c => normalizeMemberNo(c.no) === key);
             if (cust) {
                 cust.histories = [...contractHistoryMap[key]];
                 if (contractHistoryMap[key].length > 0) {
@@ -2560,7 +2558,7 @@
         }
 
         function updateSingleHistory(custNo, hIdx) {
-            let key = String(custNo).trim();
+            let key = normalizeMemberNo(custNo);
             let typeEl = document.getElementById(`hm_type_${key}_${hIdx}`);
             let dateEl = document.getElementById(`hm_date_${key}_${hIdx}`);
             let memoEl = document.getElementById(`hm_memo_${key}_${hIdx}`);
@@ -2577,7 +2575,7 @@
                 return dA.localeCompare(dB);
             });
 
-            let cust = customerDataList.find(c => String(c.no).trim() === key);
+            let cust = customerDataList.find(c => normalizeMemberNo(c.no) === key);
             if (cust) {
                 cust.histories = [...contractHistoryMap[key]];
                 if (contractHistoryMap[key].length > 0) {
@@ -2603,11 +2601,11 @@
 
         function deleteSingleHistory(custNo, hIdx) {
             if (!confirm("해당 계약 이력을 삭제하시겠습니까?")) return;
-            let key = String(custNo).trim();
+            let key = normalizeMemberNo(custNo);
 
             contractHistoryMap[key].splice(hIdx, 1);
             
-            let cust = customerDataList.find(c => String(c.no).trim() === key);
+            let cust = customerDataList.find(c => normalizeMemberNo(c.no) === key);
             if (cust) {
                 cust.histories = [...contractHistoryMap[key]];
             }
@@ -2627,8 +2625,8 @@
 
         // 관련 서류 모달
         function openDocModal(no) {
-            let key = String(no).trim();
-            let item = customerDataList.find(x => String(x.no).trim() === key);
+            let key = normalizeMemberNo(no);
+            let item = customerDataList.find(x => normalizeMemberNo(x.no) === key);
             if (!item) return;
 
             document.getElementById('doc_cust_no').value = key;
@@ -2643,7 +2641,7 @@
         }
 
         function renderDocModalList(no) {
-            let key = String(no).trim();
+            let key = normalizeMemberNo(no);
             let container = document.getElementById('docListContainer');
             let list = docDataMap[key] || [];
 
@@ -2670,7 +2668,7 @@
 
         function saveDocRecord() {
             let rawNo = document.getElementById('doc_cust_no').value;
-            let no = String(rawNo).trim();
+            let no = normalizeMemberNo(rawNo);
             let name = document.getElementById('doc_name').value.trim();
             let fileInput = document.getElementById('doc_file_input');
             let fileName = fileInput.files && fileInput.files[0] ? fileInput.files[0].name : '';
@@ -2702,7 +2700,7 @@
 
         function deleteDocItem(no, idx) {
             if (!confirm("해당 서류를 삭제하시겠습니까?")) return;
-            let key = String(no).trim();
+            let key = normalizeMemberNo(no);
             docDataMap[key].splice(idx, 1);
             renderDocModalList(key);
             saveLocalStorage();
@@ -2711,8 +2709,8 @@
 
         // 상담 내역 모달
         function openCounselModal(no) {
-            let key = String(no).trim();
-            let item = customerDataList.find(x => String(x.no).trim() === key);
+            let key = normalizeMemberNo(no);
+            let item = customerDataList.find(x => normalizeMemberNo(x.no) === key);
             if (!item) return;
 
             document.getElementById('counsel_cust_no').value = key;
@@ -2727,7 +2725,7 @@
         }
 
         function renderCounselModalList(no) {
-            let key = String(no).trim();
+            let key = normalizeMemberNo(no);
             let container = document.getElementById('counselListContainer');
             let list = counselDataMap[key] || [];
 
@@ -2756,7 +2754,7 @@
 
         function saveCounselRecord() {
             let rawNo = document.getElementById('counsel_cust_no').value;
-            let no = String(rawNo).trim();
+            let no = normalizeMemberNo(rawNo);
             let date = document.getElementById('counsel_date').value;
             let type = document.getElementById('counsel_type').value;
             let text = document.getElementById('counsel_text').value.trim();
@@ -2786,7 +2784,7 @@
 
         function deleteCounselItem(no, idx) {
             if (!confirm("해당 상담 내역을 삭제하시겠습니까?")) return;
-            let key = String(no).trim();
+            let key = normalizeMemberNo(no);
             counselDataMap[key].splice(idx, 1);
             renderCounselModalList(key);
             saveLocalStorage();
@@ -2829,7 +2827,7 @@
             item.store = document.getElementById('edit_store').value.trim();
             item.manager = document.getElementById('edit_manager').value.trim();
 
-            let key = String(item.no).trim();
+            let key = normalizeMemberNo(item.no);
 
             if (oldAmt !== newAmt) {
                 if (!contractHistoryMap[key]) contractHistoryMap[key] = [];
@@ -2871,8 +2869,8 @@
         }
 
         function openPaymentDetailModal(no) {
-            let key = String(no).trim();
-            let item = customerDataList.find(x => String(x.no).trim() === key);
+            let key = normalizeMemberNo(no);
+            let item = customerDataList.find(x => normalizeMemberNo(x.no) === key);
             if (!item) return;
 
             document.getElementById('p_edit_no').value = key;
@@ -3003,7 +3001,7 @@
             }
 
             let excelRows = exportData.map(item => {
-                let key = String(item.no).trim();
+                let key = normalizeMemberNo(item.no);
                 let hList = (contractHistoryMap[key] || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 let lastHistory = hList.length > 0 ? `${hList[hList.length - 1].type} (${hList[hList.length - 1].date || hList[hList.length - 1].startDate || '-'})` : '-';
                 return {
@@ -3068,23 +3066,24 @@
             let name = document.getElementById('m_name').value.trim();
             if (!no || !name) { alert("회원번호와 회원명은 필수입니다."); return; }
 
+            let cleanNo = normalizeMemberNo(no);
             let startD = document.getElementById('m_start').value;
             let statusVal = document.getElementById('m_status').value;
 
             let initialHist = [];
-            if (no && startD) {
+            if (cleanNo && startD) {
                 initialHist.push({
                     type: '사용',
                     date: startD,
                     memo: '신규등록 시 청구시작일 자동연동',
                     fileName: ''
                 });
-                contractHistoryMap[no] = [...initialHist];
+                contractHistoryMap[cleanNo] = [...initialHist];
             }
 
             customerDataList.unshift({
                 idx: Date.now(),
-                no: no,
+                no: cleanNo,
                 name: name,
                 phone: document.getElementById('m_phone').value.trim(),
                 status: statusVal,
@@ -3098,7 +3097,7 @@
                 histories: initialHist
             });
 
-            logEditRecord('CUST', no, `신규 고객 수동 등록 (${name})`);
+            logEditRecord('CUST', cleanNo, `신규 고객 수동 등록 (${name})`);
 
             updateSelectOptions();
             updateTabBadges();
